@@ -590,6 +590,28 @@ def _view_dimensions(items, pl, settings):
                           vertex[1] + up * label_r * math.sin(a) + size * 0.28,
                           "%d\u00b0" % degrees, size * 0.7, L_DIMS, DIM_GREY, anchor='middle'))
 
+    # Thickness of angled bars: square across the bar, text beside it when it does not fit.
+    from .export_pdf import text_width
+    for ax, ay, bx, by, dist in vd.thickness:
+        pa, pb = pl.to_paper(ax, ay), pl.to_paper(bx, by)
+        text = fmt.text(dist)
+        gap = math.hypot(pb[0] - pa[0], pb[1] - pa[1])
+        dim = Dim(pa, pb, pa, pb, text, size)
+        width = text_width(text, size)
+        if width + 1.0 > gap and gap > 1e-6:
+            shift = (gap / 2.0 + 1.6 + width / 2.0) / gap
+            best = None
+            # The bar's length is dimensioned on its outer side, so the
+            # thickness text goes on the inner side, clear of it.
+            for s in (shift, -shift):
+                dim.text_shift = s
+                tx, ty, _ = dim.text_position()
+                away = math.hypot(tx - centre[0], ty - centre[1])
+                if best is None or away < best[0]:
+                    best = (away, s)
+            dim.text_shift = best[1]
+        items.append(dim)
+
     # Radii: a short leader pointing at the arc, away from its centre.
     cx_view = (v.min_x + v.max_x) / 2.0
     placed_labels = []

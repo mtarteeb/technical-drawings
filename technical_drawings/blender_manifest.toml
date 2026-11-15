@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "technical_drawings"
-version = "0.9.12"
+version = "0.9.13"
 name = "Technical Drawings"
 tagline = "Technical drawing sheets from selected objects"
 maintainer = "TARTEEB"

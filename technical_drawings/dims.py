@@ -129,6 +129,7 @@ class ViewDims:
         self.y_chain = []      # sorted y positions for the vertical chain
         self.arcs = []         # cleanup.Arc, one per distinct radius
         self.slanted = []      # (x0, y0, x1, y1, length, slope): angled edges to dimension
+        self.thickness = []    # (ax, ay, bx, by, distance): across an angled bar, edge to edge
 
 
 def compute(view, fmt, k, text_size, detail='MEDIUM', forced_parts=(), radii=True):
@@ -234,6 +235,7 @@ def compute(view, fmt, k, text_size, detail='MEDIUM', forced_parts=(), radii=Tru
         candidates.append(edge)
     candidates.sort(key=lambda e: -e[4])
     picked = []
+    thickness, thick_done = [], set()
     for edge in candidates:
         length, slope = edge[4], edge[5]
         # The chains run down the left and along the bottom, so of two matching
@@ -259,7 +261,24 @@ def compute(view, fmt, k, text_size, detail='MEDIUM', forced_parts=(), radii=Tru
             parallel = abs(ox * ey_ - oy * ex_) < 0.06 * ol * length
             return parallel and abs((mx - o[0]) * oy - (my - o[1]) * ox) / ol < 0.1 * extent
 
-        if any(beside(o) for o in picked):
+        hit = next((o for o in picked if beside(o)), None)
+        if hit is not None:
+            # This is the other side of an angled bar: give the bar's thickness,
+            # measured square across from this edge to the one already taken.
+            if hit[:4] not in thick_done:
+                ox, oy = hit[2] - hit[0], hit[3] - hit[1]
+                ol = math.hypot(ox, oy)
+                for share_along in (0.3, 0.5, 0.7):
+                    ax = edge[0] + (edge[2] - edge[0]) * share_along
+                    ay = edge[1] + (edge[3] - edge[1]) * share_along
+                    t_ = ((ax - hit[0]) * ox + (ay - hit[1]) * oy) / ol
+                    if 0.0 <= t_ <= ol:
+                        bx, by = hit[0] + ox / ol * t_, hit[1] + oy / ol * t_
+                        dist = math.hypot(ax - bx, ay - by)
+                        if dist * k >= 2.5:
+                            thickness.append((ax, ay, bx, by, dist))
+                            thick_done.add(hit[:4])
+                        break
             continue
         if not on_outline(*edge[:4]) and length < 0.25 * extent:
             continue
@@ -267,6 +286,7 @@ def compute(view, fmt, k, text_size, detail='MEDIUM', forced_parts=(), radii=Tru
         if len(picked) == 4:
             break
     out.slanted = picked
+    out.thickness = thickness
 
     if radii:
         found = {}
