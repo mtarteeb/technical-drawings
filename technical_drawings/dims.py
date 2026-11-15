@@ -141,6 +141,17 @@ def compute(view, fmt, k, text_size, detail='MEDIUM', forced_parts=(), radii=Tru
     horizontal, vertical, _other = cleanup.split_axis_aligned(segs)
     threshold = DETAIL[detail]
 
+    # Lettering (text objects) is drawn but never dimensioned.
+    pad = 1e-4
+    boxes = [(b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad) for b in getattr(view, 'text_boxes', ())]
+
+    def in_text(x, y):
+        return any(b[0] <= x <= b[2] and b[1] <= y <= b[3] for b in boxes)
+
+    if boxes:
+        horizontal = [(y, x0, x1) for y, x0, x1 in horizontal if not in_text((x0 + x1) / 2.0, y)]
+        vertical = [(x, y0, y1) for x, y0, y1 in vertical if not in_text(x, (y0 + y1) / 2.0)]
+
     fx, fy = [], []
     for name in forced_parts:
         box = view.parts.get(name)
@@ -162,6 +173,8 @@ def compute(view, fmt, k, text_size, detail='MEDIUM', forced_parts=(), radii=Tru
         for pl in cleanup.chain(cleanup.clean_segments(view.polylines)):
             for arc in cleanup.find_arcs(pl):
                 if arc.r * k < 2.5:              # too small to label on paper
+                    continue
+                if in_text(*arc.mid_point()):
                     continue
                 key = fmt.number(arc.r)
                 best = found.get(key)

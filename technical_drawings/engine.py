@@ -101,13 +101,14 @@ def light_colour(obj):
 class View:
     """One 2D view. Coordinates are in metres, x right, y up."""
 
-    def __init__(self, name, polylines, hidden, lights, parts, bounds):
+    def __init__(self, name, polylines, hidden, lights, parts, bounds, text_boxes=()):
         self.name = name
         self.label = VIEW_LABELS.get(name, name)
         self.polylines = polylines      # list of (N,2) float arrays
         self.hidden = hidden            # list of (N,2) float arrays
         self.lights = lights            # list of (colour, [polylines])
         self.parts = parts              # {object name: (min_x, min_y, max_x, max_y)}
+        self.text_boxes = list(text_boxes)   # boxes of text objects: lettering is not dimensioned
         self.min_x, self.min_y, self.max_x, self.max_y = bounds
 
     @property
@@ -314,7 +315,8 @@ def extract_views(objects, view_names, front_dir, frame=1, hidden_lines=False,
                 px, py = (pts @ r) * unit_scale, (pts @ u) * unit_scale
                 parts[name] = (px.min(), py.min(), px.max(), py.max())
             lights = [(col, lines[name]) for name, col in light_layers.items() if lines.get(name)]
-            views[view] = View(view, vis, hid, lights, parts, bounds)
+            text_boxes = [parts[o.name] for o in objects if o.type == 'FONT' and o.name in parts]
+            views[view] = View(view, vis, hid, lights, parts, bounds, text_boxes)
     finally:
         tmp.close()
 

@@ -32,6 +32,7 @@ Pantone swatches and the information strip.
 - **Dimensions** are measured from the model: overall sizes, a chain at every long straight edge, radii of arcs.
 - **Notes**: click an object, type its note (for example `STICKER`) in *Dimensions and Notes*. It appears with an arrow.
 - **Own Dimensions**: tick this on an object whose edges must always be dimensioned.
+- **Text objects** are drawn as letter outlines automatically. They stay editable text in the model; nothing is converted.
 - **Light strips**: objects with a light-emitting material are drawn in colour.
 - **Render pictures**: add a camera under *Render Pictures*; it is rendered with the scene's render settings when you export. A finished render file can be used instead.
 - **Files**: PDF, SVG (Illustrator), DXF (AutoCAD, true size, editable dimensions) and CNC outlines (DXF).
