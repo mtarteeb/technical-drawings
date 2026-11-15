@@ -33,7 +33,8 @@ Pantone swatches and the information strip.
 - **Paper**: standard sizes A4 to A0. When the views cannot be drawn large enough for the dimensions to stay readable, the add-on either spreads them over more sheets or steps up to the next paper size (*If It Does Not Fit*).
 - **Company logo**: the TARTEEB logo is drawn in black in its own *Company* box of the information strip (can be switched off under *Sheet Information*).
 - **Decoration**: tick *Decoration (No Dimensions)* on logos and graphics so they are drawn but not dimensioned.
-- **Dimensions** are measured from the model: overall sizes, a chain at every long straight edge, radii of arcs.
+- **Dimensions** are measured from the model: overall sizes, a chain at every long straight edge (so inner sizes such as an opening and a frame thickness are shown), radii of arcs. A gap too narrow for its text is never dropped; the text is placed beside it.
+- **Bevels**: Bevel modifiers are ignored while drawing (*Ignore Bevels*), so sizes are true corner-to-corner sizes. The model is not changed.
 - **Notes**: click an object, type its note (for example `STICKER`) in *Dimensions and Notes*. It appears with an arrow.
 - **Own Dimensions**: tick this on an object whose edges must always be dimensioned.
 - **Text objects** are drawn as letter outlines automatically. They stay editable text in the model; nothing is converted.
