@@ -12,7 +12,7 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
                        FloatVectorProperty, IntProperty, PointerProperty, StringProperty)
 from bpy.types import AddonPreferences, Operator, Panel, PropertyGroup, UIList
 
-from . import dims, engine, export_dxf, export_pdf, export_svg, images, quotation, sheet, updater
+from . import cad_open, dims, engine, export_dxf, export_pdf, export_svg, images, quotation, sheet, updater
 
 
 class TD_Swatch(PropertyGroup):
@@ -155,6 +155,11 @@ class TD_Settings(PropertyGroup):
                                description="Where the drawings are saved")
     file_name: StringProperty(name="File Name", default="",
                               description="Leave empty to use the drawing title or project name")
+    open_dxf: BoolProperty(
+        name="Open DXF in AutoCAD", default=True,
+        description="Windows: open the exported DXF in AutoCAD straight away. This avoids AutoCAD's "
+                    "'currently in use or is read-only' alert, which appears when a DXF is "
+                    "double-clicked while AutoCAD is closed")
     open_after: BoolProperty(
         name="Open When Done", default=True,
         description="Open the PDF after exporting, or the folder when no PDF was made. "
@@ -231,6 +236,10 @@ class TD_OT_export(Operator):
             # read-only (locked) in AutoCAD.
             pdfs = [p for p in written if p.lower().endswith(".pdf")]
             bpy.ops.wm.path_open(filepath=pdfs[0] if pdfs else out_dir)
+        if st.open_dxf and not quotation_mode and not bpy.app.background:
+            drawings = [p for p in written if p.lower().endswith(".dxf") and not p.endswith(" - CNC.dxf")]
+            if drawings:
+                cad_open.open_dxf(drawings[0])
         return {'FINISHED'}
 
     def _production(self, context, st, objects, out_dir, base):
@@ -698,6 +707,8 @@ class TD_PT_output(TD_PT_base, Panel):
         layout.prop(st, "output_dir")
         layout.prop(st, "file_name")
         layout.prop(st, "open_after")
+        if st.mode == 'PRODUCTION' and st.export_dxf:
+            layout.prop(st, "open_dxf")
 
 
 classes = (

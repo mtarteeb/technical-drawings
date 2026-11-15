@@ -59,6 +59,12 @@ Dimensions and notes laid over a finished render, as editable lines and text.
 2. Commit.
 3. Run `tools/release.sh`.
 
+## AutoCAD: "currently in use or is read-only"
+
+AutoCAD has a long-standing fault: when it is closed and a DXF is double-clicked, it opens the file twice and shows this alert for the second copy. Press **No** to keep the first, editable copy.
+
+To avoid it, leave **Open DXF in AutoCAD** ticked under *Files* (Windows). The add-on then opens the DXF in AutoCAD itself in a way that does not trigger the fault. Or start AutoCAD before opening a DXF.
+
 ## Known limits
 
 - Text on the sheet uses Latin characters only (no Arabic yet).
