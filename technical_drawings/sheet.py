@@ -163,6 +163,11 @@ def _expand_dim(d):
                         d.layer, d.color, d.width * 2.2))
     out.append(Line([d.a, d.b], d.layer, d.color, d.width))
     tx, ty, rotation = d.text_position()
+    if d.text_level and abs(d.text_shift) > 1e-6:
+        # The text was slid away from its gap: tie it back with a short line.
+        out.append(Line([((ax + bx) / 2.0, (ay + by) / 2.0),
+                         (tx + nx * d.size * 0.8, ty + ny * d.size * 0.8)],
+                        d.layer, d.color, d.width))
     out.append(Text(tx, ty, d.text, d.size, d.layer, d.color,
                     bold=d.bold, anchor='middle', rotation=rotation))
     return out
@@ -206,7 +211,8 @@ class SheetSettings:
     radii: bool = True
     object_notes: list = field(default_factory=list)    # list of (object name, text)
     forced_parts: list = field(default_factory=list)    # object names with their own dimensions
-    dim_text_size: float = 2.1
+    dim_text_size: float = 12.0 * 25.4 / 72.0           # dimension text: 12 pt on paper, at any scale
+    fit: str = 'SHEETS'                                 # SHEETS = add sheets, PAPER = use bigger paper
 
 
 @dataclass
@@ -239,6 +245,10 @@ class Sheet:
     scale: int
     title: str
     fmt: object = None
+    paper: str = 'A3'
+    text_size: float = 12.0 * 25.4 / 72.0
+    number: int = 1
+    count: int = 1
 
 
 MARGIN = 8.0
@@ -246,8 +256,13 @@ STRIP_H = 30.0
 STRIP_HEAD_H = 7.0
 CELL_GAP = 8.0           # paper mm between view cells
 LABEL_H = 7.0
-DIM_STEP = 7.5           # distance between dimension levels
 NOTE_GAP = 9.0           # view edge to the note text
+PAPER_ORDER = ['A4', 'A3', 'A2', 'A1', 'A0']
+
+
+def _dim_step(size):
+    """Distance between dimension levels; leaves room for two rows of text."""
+    return size * 3.0
 
 
 def _arrangements(views):
@@ -276,10 +291,12 @@ def _block_size(rows, views, k, margins):
     return max(widths), sum(heights) + CELL_GAP * (len(rows) - 1)
 
 
-def _choose_layout(views, avail_w, avail_h, margins):
+def _choose_layout(views, avail_w, avail_h, margins, min_scale=1):
     best = None
     for rows in _arrangements(views):
         for scale in SCALES:
+            if scale < min_scale:
+                continue
             k = 1000.0 / scale
             w, h = _block_size(rows, views, k, margins)
             if w <= avail_w and h <= avail_h:
@@ -309,7 +326,7 @@ def _assign_notes(views, object_notes):
     return per_view
 
 
-def _strip(items, settings, left, right, bottom, strip_top, scale):
+def _strip(items, settings, left, right, bottom, strip_top, scale, paper, number, count):
     items.append(Line([(left, strip_top), (right, strip_top)], L_FRAME, FRAME_GREY, 0.25))
     head_bottom = strip_top + STRIP_HEAD_H
     items.append(Line([(left, head_bottom), (right, head_bottom)], L_FRAME, FRAME_GREY, 0.18))
@@ -354,7 +371,9 @@ def _strip(items, settings, left, right, bottom, strip_top, scale):
             sx += box + gap
 
     notes = [n for n in settings.notes if n.strip()]
-    notes.append("SCALE 1:%d ON %s." % (scale, settings.paper))
+    notes.append("SCALE 1:%d ON %s." % (scale, paper))
+    if count > 1:
+        notes.append("SHEET %d OF %d." % (number, count))
     ny = head_bottom + 5.0
     size = 2.4 if len(notes) <= 4 else 1.9
     step = (bottom - head_bottom - 4.0) / max(len(notes), 4)
@@ -381,21 +400,41 @@ def _chain(items, pairs, texts, size):
     """Add a chain of dimensions; text that is wider than its gap drops below
     the line, alternating between two rows so neighbours do not collide."""
     from .export_pdf import text_width
-    row = 0
-    for (p0, p1, a, b), text in zip(pairs, texts):
+    if not pairs:
+        return
+    # Position along the chain, measured in the reading direction.
+    a0, b_last = pairs[0][2], pairs[-1][3]
+    total = math.hypot(b_last[0] - a0[0], b_last[1] - a0[1]) or 1.0
+    ux, uy = (b_last[0] - a0[0]) / total, (b_last[1] - a0[1]) / total
+    flip = ux < -1e-9 or (abs(ux) <= 1e-9 and uy > 0)      # same rule as Dim.text_position
+    cursor = None            # end of the last text placed below the line
+    order = list(zip(pairs, texts))
+    if flip:
+        order.reverse()
+    for (p0, p1, a, b), text in order:
         gap = math.hypot(b[0] - a[0], b[1] - a[1])
-        if text_width(text, size) + 1.0 <= gap:
-            level, row = 0, 0
-        else:
-            row = 2 if row == 1 else 1
-            level = row
-        items.append(Dim(p0, p1, a, b, text, size, text_level=level))
+        width = text_width(text, size)
+        if width + 1.0 <= gap:
+            items.append(Dim(p0, p1, a, b, text, size))
+            continue
+        # Too wide for its gap: put it below the line and slide it along
+        # until it is clear of the previous one.
+        sa = (a[0] - a0[0]) * ux + (a[1] - a0[1]) * uy
+        sb = (b[0] - a0[0]) * ux + (b[1] - a0[1]) * uy
+        mid = (sa + sb) / 2.0
+        if flip:
+            mid = -mid
+        centre = mid if cursor is None else max(mid, cursor + width / 2.0 + 1.2)
+        cursor = centre + width / 2.0
+        items.append(Dim(p0, p1, a, b, text, size, text_level=1,
+                         text_shift=(centre - mid) / gap if gap > 1e-9 else 0.0))
 
 
 def _view_dimensions(items, pl, settings):
     v, k, fmt, size = pl.view, pl.k, settings.fmt, settings.dim_text_size
     vd = D.compute(v, fmt, k, size, settings.detail, settings.forced_parts, settings.radii)
 
+    DIM_STEP = _dim_step(size)
     # Horizontal: chain just below the view, overall below the chain.
     level = 1
     y_edge = pl.bottom
@@ -435,9 +474,9 @@ def _view_dimensions(items, pl, settings):
         dx, dy = mx - arc.cx, -(my - arc.cy)          # paper y points down
         length = math.hypot(dx, dy) or 1.0
         dx, dy = dx / length, dy / length
-        elbow = (tip[0] + dx * 7.0, tip[1] + dy * 7.0)
+        elbow = (tip[0] + dx * size * 2.6, tip[1] + dy * size * 2.6)
         side = 1.0 if (dx > 0 or (dx == 0 and mx >= cx_view)) else -1.0
-        end = (elbow[0] + side * 2.5, elbow[1])
+        end = (elbow[0] + side * size, elbow[1])
         label = ("Ø" + fmt.number(arc.r * 2.0)) if arc.full else ("R" + fmt.number(arc.r))
         items.append(Leader([tip, elbow, end], label, size, L_DIMS,
                             anchor='start' if side > 0 else 'end'))
@@ -489,48 +528,126 @@ def _view_notes(items, pl, notes, size):
         items.append(Leader([anchor, (x_text - 3.0, y), (x_text, y)], text, size, L_NOTES))
 
 
-def build_sheet(views, settings):
-    """Lay out `views` ({name: engine.View}) on one sheet."""
-    from .export_pdf import text_width
-
-    if settings.fmt is None:
-        settings.fmt = D.Format()
-    pw, ph = PAPER_SIZES[settings.paper]
-    items = []
-
+def _areas(paper, has_pictures):
+    pw, ph = PAPER_SIZES[paper]
     left, right = MARGIN, pw - MARGIN
     top, bottom = MARGIN, ph - MARGIN
     strip_top = bottom - STRIP_H
-    items.append(Line([(left, top), (right, top), (right, bottom), (left, bottom)],
-                      L_FRAME, FRAME_GREY, 0.25, closed=True))
-
     area_left = left + 4.0
-    area_top = top + 4.0
-    area_bottom = strip_top - 4.0
-    pics = settings.pictures[:3]
-    if pics:
-        col_w = (right - left) * 0.28
-        _pictures(items, pics, area_left, area_top, area_bottom, col_w)
-        area_left += col_w + 6.0
+    col_w = (right - left) * 0.28 if has_pictures else 0.0
+    views_left = area_left + (col_w + 6.0 if has_pictures else 0.0)
+    return dict(pw=pw, ph=ph, left=left, right=right, top=top, bottom=bottom, strip_top=strip_top,
+                area_left=area_left, area_top=top + 4.0, area_bottom=strip_top - 4.0,
+                col_w=col_w, views_left=views_left)
 
-    # Space each view needs around it: (left, right, top, bottom) in paper mm.
-    notes_by_view = _assign_notes(views, settings.object_notes)
+
+def _margins(views, settings, notes_by_view):
+    """Space each view needs around it: (left, right, top, bottom) in paper mm."""
+    from .export_pdf import text_width
     size = settings.dim_text_size
-    margins = {}
+    step = _dim_step(size)
+    out = {}
     for name in views:
-        dim_room = DIM_STEP * 2 + size + 2.0 if settings.dimensions else 2.0
+        dim_room = step * 2 + size + 2.0 if settings.dimensions else 2.0
         note_room = 3.0
         if notes_by_view[name]:
             note_room = NOTE_GAP + 2.0 + max(text_width(t, size) for _, t in notes_by_view[name])
-        margins[name] = (dim_room, note_room, LABEL_H, dim_room)
+        out[name] = (dim_room, note_room, LABEL_H + size * 0.6, dim_room)
+    return out
 
-    avail_w = right - area_left - 4.0
-    avail_h = area_bottom - area_top
-    scale, rows = _choose_layout(views, avail_w, avail_h, margins)
+
+def _fit_scale(views, paper, has_pictures, margins):
+    a = _areas(paper, has_pictures)
+    avail_w = a['right'] - a['views_left'] - 4.0
+    avail_h = a['area_bottom'] - a['area_top']
+    for rows in _arrangements(views):
+        for scale in SCALES:
+            w, h = _block_size(rows, views, 1000.0 / scale, margins)
+            if w <= avail_w and h <= avail_h:
+                return scale
+    return None
+
+
+def _groupings(views):
+    """Ways to spread the views over sheets, fewest sheets first."""
+    names = [n for n in ('FRONT', 'RIGHT', 'LEFT', 'BACK', 'TOP') if n in views]
+    out = [[names]]
+    elevations = [n for n in names if n != 'TOP']
+    if 'TOP' in names and elevations:
+        out.append([elevations, ['TOP']])
+    if len(names) > 1 and [[n] for n in names] not in out:
+        out.append([[n] for n in names])
+    return out
+
+
+def _plan(views, settings, margins):
+    """Decide paper size, how views are spread over sheets, and the scale.
+
+    The dimension text has a fixed size on paper, so the model must be drawn
+    large enough for the dimensions to stay readable. When that does not fit
+    the chosen paper, views move to more sheets or the paper steps up to the
+    next standard size, as the user chose.
+    """
+    has_pics = bool(settings.pictures)
+    wanted = 0.0
+    if settings.dimensions:
+        wanted = max(D.needed_k(v, settings.fmt, settings.dim_text_size, settings.detail,
+                                settings.forced_parts) for v in views.values())
+    # Largest scale denominator that still keeps the dimensions readable.
+    readable = SCALES[-1]
+    if wanted > 0:
+        ok = [s for s in SCALES if 1000.0 / s >= wanted]
+        readable = ok[-1] if ok else SCALES[0]
+
+    def evaluate(paper, groups):
+        worst = 0
+        for i, group in enumerate(groups):
+            sub = {n: views[n] for n in group}
+            s = _fit_scale(sub, paper, has_pics and i == 0, margins)
+            if s is None:
+                return None
+            worst = max(worst, s)
+        return worst
+
+    start = PAPER_ORDER.index(settings.paper)
+    candidates = []
+    if settings.fit == 'PAPER':
+        for paper in PAPER_ORDER[start:]:
+            candidates.append((paper, _groupings(views)[0]))
+    else:
+        for groups in _groupings(views):
+            candidates.append((settings.paper, groups))
+    best = None
+    for paper, groups in candidates:
+        scale = evaluate(paper, groups)
+        if scale is None:
+            continue
+        best = (paper, groups, scale)
+        if scale <= readable:
+            break
+    if best is None:
+        paper, groups = candidates[-1]
+        best = (paper, groups, SCALES[-1])
+    return best
+
+
+def _build_one(views, settings, paper, scale, notes_by_view, margins, pictures, number, count):
+    a = _areas(paper, bool(pictures))
+    pw, ph = a['pw'], a['ph']
+    left, right, top, bottom, strip_top = a['left'], a['right'], a['top'], a['bottom'], a['strip_top']
+    items = [Line([(left, top), (right, top), (right, bottom), (left, bottom)],
+                  L_FRAME, FRAME_GREY, 0.25, closed=True)]
+    if pictures:
+        _pictures(items, pictures[:3], a['area_left'], a['area_top'], a['area_bottom'], a['col_w'])
+
+    size = settings.dim_text_size
+    avail_w = right - a['views_left'] - 4.0
+    avail_h = a['area_bottom'] - a['area_top']
+    scale, rows = _choose_layout(views, avail_w, avail_h, margins, min_scale=scale)
     k = 1000.0 / scale
     block_w, block_h = _block_size(rows, views, k, margins)
-    bx = area_left + (avail_w - block_w) / 2.0
-    by = area_top + (avail_h - block_h) / 2.0
+    bx = a['views_left'] + (avail_w - block_w) / 2.0
+    by = a['area_top'] + (avail_h - block_h) / 2.0
 
     placements = {}
     y = by
@@ -545,7 +662,7 @@ def build_sheet(views, settings):
             # Views in a row share a ground line (bottom aligned).
             vy = y + row_top + (row_h - v.height * k)
             placements[name] = Placement(v, x + ml, vy, k)
-            items.append(Text(x + ml, vy - 3.2, v.label, 2.5, L_TEXT, RED, bold=True))
+            items.append(Text(x + ml, vy - 3.2, v.label, size * 0.85, L_TEXT, RED, bold=True))
             x += ml + v.width * k + mr + CELL_GAP
         y += row_top + row_h + row_bottom + CELL_GAP
 
@@ -564,5 +681,21 @@ def build_sheet(views, settings):
             _view_dimensions(items, pl, settings)
         _view_notes(items, pl, notes_by_view[name], size)
 
-    _strip(items, settings, left, right, bottom, strip_top, scale)
-    return Sheet(pw, ph, items, placements, scale, settings.drawing_title, settings.fmt)
+    _strip(items, settings, left, right, bottom, strip_top, scale, paper, number, count)
+    return Sheet(pw, ph, items, placements, scale, settings.drawing_title, settings.fmt,
+                 paper, size, number, count)
+
+
+def build_sheets(views, settings):
+    """Lay out `views` ({name: engine.View}) on one or more sheets."""
+    if settings.fmt is None:
+        settings.fmt = D.Format()
+    notes_by_view = _assign_notes(views, settings.object_notes)
+    margins = _margins(views, settings, notes_by_view)
+    paper, groups, scale = _plan(views, settings, margins)
+    sheets = []
+    for i, group in enumerate(groups):
+        sub = {n: views[n] for n in group}
+        sheets.append(_build_one(sub, settings, paper, scale, notes_by_view, margins,
+                                 settings.pictures if i == 0 else [], i + 1, len(groups)))
+    return sheets

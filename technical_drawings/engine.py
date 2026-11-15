@@ -315,7 +315,8 @@ def extract_views(objects, view_names, front_dir, frame=1, hidden_lines=False,
                 px, py = (pts @ r) * unit_scale, (pts @ u) * unit_scale
                 parts[name] = (px.min(), py.min(), px.max(), py.max())
             lights = [(col, lines[name]) for name, col in light_layers.items() if lines.get(name)]
-            text_boxes = [parts[o.name] for o in objects if o.type == 'FONT' and o.name in parts]
+            text_boxes = [parts[o.name] for o in objects
+                          if (o.type == 'FONT' or getattr(o, 'td_no_dims', False)) and o.name in parts]
             views[view] = View(view, vis, hid, lights, parts, bounds, text_boxes)
     finally:
         tmp.close()

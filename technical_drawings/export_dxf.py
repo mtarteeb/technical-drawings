@@ -205,8 +205,8 @@ def write_dxf(path, sh):
 
     wr = _Writer()
     dim_count = 0
-    dim_text = 2.1 * CAP * f
-    tick = 2.1 * 0.42 * f
+    dim_text = sh.text_size * CAP * f
+    tick = sh.text_size * 0.42 * f
 
     def emit(out, it, layer=None):
         layer = layer or it.layer

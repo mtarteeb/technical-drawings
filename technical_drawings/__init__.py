@@ -52,7 +52,18 @@ class TD_Settings(PropertyGroup):
         default="")
 
     paper: EnumProperty(name="Paper", default='A3',
+                        description="Sheet size. With 'Bigger Paper' this is the smallest size used",
                         items=[(k, k + " landscape", "") for k in sheet.PAPER_SIZES])
+    fit: EnumProperty(
+        name="If It Does Not Fit", default='SHEETS',
+        description="What to do when the views cannot be drawn large enough on one sheet "
+                    "for the dimensions to stay readable",
+        items=[('SHEETS', "More Sheets", "Keep the paper size and spread the views over more sheets"),
+               ('PAPER', "Bigger Paper", "Keep one sheet and step up to the next standard size (up to A0)")])
+    text_pt: FloatProperty(
+        name="Text Size", default=12.0, min=6.0, max=36.0, subtype='NONE',
+        description="Size of dimension and note text on the printed sheet, in points. "
+                    "It stays this size whatever the scale of the drawing")
     front_direction: EnumProperty(
         name="Front Faces",
         description="Which way the front of the selected objects faces",
@@ -108,8 +119,6 @@ class TD_Settings(PropertyGroup):
     quote_colour: FloatVectorProperty(name="Colour", subtype='COLOR', size=3, min=0.0, max=1.0,
                                       default=(1.0, 1.0, 1.0),
                                       description="Colour of the dimensions and notes on the picture")
-    quote_text_size: FloatProperty(name="Text Size", default=6.0, min=2.0, max=20.0,
-                                   description="Dimension text size, as millimetres on a 400 mm wide page")
 
     export_pdf: BoolProperty(name="PDF", default=True)
     export_svg: BoolProperty(name="SVG (Illustrator)", default=False)
@@ -240,22 +249,27 @@ class TD_OT_export(Operator):
                 dimensions=st.dimensions, fmt=fmt, detail=st.detail, radii=st.radii,
                 object_notes=[(o.name, o.td_note.strip()) for o in objects
                               if st.object_notes and o.td_note.strip()],
-                forced_parts=[o.name for o in objects if o.td_own_dims])
-            sh = sheet.build_sheet(views, settings)
+                forced_parts=[o.name for o in objects if o.td_own_dims],
+                dim_text_size=st.text_pt * 25.4 / 72.0, fit=st.fit)
+            sheets = sheet.build_sheets(views, settings)
+
+            def numbered(ext, sh):
+                tail = " - sheet %d" % sh.number if len(sheets) > 1 else ""
+                return os.path.join(out_dir, base + tail + ext)
 
             if st.export_pdf:
                 path = os.path.join(out_dir, base + ".pdf")
-                export_pdf.write_pdf(path, [sh], image_data)
+                export_pdf.write_pdf(path, sheets, image_data)
                 written.append(path)
-            if st.export_svg:
-                path = os.path.join(out_dir, base + ".svg")
-                export_svg.write_svg(path, sh, image_data)
-                written.append(path)
-            if st.export_dxf:
-                path = os.path.join(out_dir, base + ".dxf")
-                export_dxf.write_dxf(path, sh)
-                written.append(path)
-            info = " at scale 1:%d" % sh.scale
+            for sh in sheets:
+                if st.export_svg:
+                    export_svg.write_svg(numbered(".svg", sh), sh, image_data)
+                    written.append(numbered(".svg", sh))
+                if st.export_dxf:
+                    export_dxf.write_dxf(numbered(".dxf", sh), sh)
+                    written.append(numbered(".dxf", sh))
+            info = " (%d sheet%s, %s, scale 1:%d)" % (
+                len(sheets), "" if len(sheets) == 1 else "s", sheets[0].paper, sheets[0].scale)
         else:
             info = ""
 
@@ -294,7 +308,7 @@ class TD_OT_export(Operator):
         meshes = [o for o in objects if o.type in engine.DRAWABLE_TYPES]
         sh = quotation.build(
             scene, camera, meshes, (picture_key, loaded[1], loaded[2]), _format(st),
-            colour=tuple(st.quote_colour), text_size=st.quote_text_size,
+            colour=tuple(st.quote_colour), text_size=st.text_pt * 25.4 / 72.0, paper=st.paper,
             own_dims=[o for o in meshes if o.td_own_dims],
             notes=[(o, o.td_note.strip()) for o in meshes if st.object_notes and o.td_note.strip()],
             overall=st.dimensions)
@@ -358,6 +372,7 @@ class TD_OT_note_to_selected(Operator):
         for ob in context.selected_objects:
             ob.td_note = src.td_note
             ob.td_own_dims = src.td_own_dims
+            ob.td_no_dims = src.td_no_dims
         return {'FINISHED'}
 
 
@@ -418,7 +433,7 @@ class TD_PT_quotation(TD_PT_base, Panel):
         if not st.quote_picture:
             layout.label(text="No file: the camera is rendered on export.", icon='INFO')
         layout.prop(st, "quote_colour")
-        layout.prop(st, "quote_text_size")
+        layout.prop(st, "paper")
 
 
 class TD_PT_views(TD_PT_base, Panel):
@@ -457,6 +472,7 @@ class TD_PT_dimensions(TD_PT_base, Panel):
         col.prop(st, "unit")
         col.prop(st, "suffix")
         col.prop(st, "decimals")
+        layout.prop(st, "text_pt")
         if st.mode == 'PRODUCTION':
             col.prop(st, "detail")
             col.prop(st, "radii")
@@ -470,6 +486,7 @@ class TD_PT_dimensions(TD_PT_base, Panel):
         box.label(text=ob.name, icon='OBJECT_DATA')
         box.prop(ob, "td_note", text="Note")
         box.prop(ob, "td_own_dims")
+        box.prop(ob, "td_no_dims")
         box.operator(TD_OT_note_to_selected.bl_idname, icon='COPYDOWN')
 
 
@@ -490,6 +507,7 @@ class TD_PT_sheet(TD_PT_base, Panel):
         layout.prop(st, "drawn_by")
         layout.prop(st, "notes")
         layout.prop(st, "paper")
+        layout.prop(st, "fit")
 
 
 class TD_PT_pictures(TD_PT_base, Panel):
@@ -573,7 +591,14 @@ def register():
                     "and it gets its own width, depth and height on quotation pictures")
 
 
+    bpy.types.Object.td_no_dims = BoolProperty(
+        name="Decoration (No Dimensions)",
+        description="Draw this object but never dimension it. Use for logos and graphics. "
+                    "Text objects are treated this way automatically")
+
+
 def unregister():
+    del bpy.types.Object.td_no_dims
     del bpy.types.Object.td_own_dims
     del bpy.types.Object.td_note
     del bpy.types.Scene.technical_drawings

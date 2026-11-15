@@ -182,3 +182,40 @@ def compute(view, fmt, k, text_size, detail='MEDIUM', forced_parts=(), radii=Tru
                     found[key] = arc
         out.arcs = sorted(found.values(), key=lambda a: -a.r)[:8]
     return out
+
+
+def needed_k(view, fmt, text_size, detail='MEDIUM', forced_parts=(), share=0.8):
+    """Paper millimetres per model metre this view needs so that `share` of
+    its chain dimensions have room for their text at `text_size`."""
+    from .export_pdf import text_width
+
+    segs = cleanup.to_segments(view.polylines)
+    horizontal, vertical, _other = cleanup.split_axis_aligned(segs)
+    pad = 1e-4
+    boxes = [(b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad) for b in getattr(view, 'text_boxes', ())]
+    if boxes:
+        def in_text(x, y):
+            return any(b[0] <= x <= b[2] and b[1] <= y <= b[3] for b in boxes)
+        horizontal = [(y, x0, x1) for y, x0, x1 in horizontal if not in_text((x0 + x1) / 2.0, y)]
+        vertical = [(x, y0, y1) for x, y0, y1 in vertical if not in_text(x, (y0 + y1) / 2.0)]
+    fx, fy = [], []
+    for name in forced_parts:
+        box = view.parts.get(name)
+        if box:
+            fx += [box[0], box[2]]
+            fy += [box[1], box[3]]
+    threshold = DETAIL[detail]
+    needs = []
+    for breaks in (_breaks(vertical, view.min_x, view.max_x, view.height, threshold, fx),
+                   _breaks(horizontal, view.min_y, view.max_y, view.width, threshold, fy)):
+        pos = sorted(breaks)
+        extent = pos[-1] - pos[0]
+        for a, b in zip(pos[:-1], pos[1:]):
+            # Small details (under 5% of the view) never fit their text; they
+            # are labelled beside the line and do not drive the scale.
+            if b - a >= 0.05 * extent:
+                needs.append((text_width(fmt.text(b - a), text_size) + 1.6) / (b - a))
+    if not needs:
+        return 0.0
+    needs.sort()
+    return needs[min(len(needs) - 1, int(math.ceil(share * len(needs))) - 1)]

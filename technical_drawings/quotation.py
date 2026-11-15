@@ -13,7 +13,6 @@ from mathutils import Vector
 
 from . import sheet as S
 
-PAGE_W = 400.0            # page width in mm; height follows the picture
 L_PICTURE = S.L_PICTURES
 BOX_EDGES = [             # pairs of bound_box corner indices, grouped by local axis
     [(0, 4), (1, 5), (2, 6), (3, 7)],      # X
@@ -43,13 +42,13 @@ def _hull(points):
 
 
 class _Projector:
-    def __init__(self, scene, camera, page_w, page_h):
+    def __init__(self, scene, camera, x, y, w, h):
         self.scene, self.camera = scene, camera
-        self.w, self.h = page_w, page_h
+        self.x, self.y, self.w, self.h = x, y, w, h
 
     def __call__(self, world):
         co = world_to_camera_view(self.scene, self.camera, Vector(world))
-        return (co.x * self.w, (1.0 - co.y) * self.h), co.z
+        return (self.x + co.x * self.w, self.y + (1.0 - co.y) * self.h), co.z
 
 
 def _avoid_overlap(dim, placed):
@@ -115,8 +114,8 @@ def _box_dims(items, corners, project, fmt, size, colour, offset, unit_scale, pl
         items.append(dim)
 
 
-def build(scene, camera, objects, picture, fmt, colour=(1.0, 1.0, 1.0), text_size=6.0,
-          own_dims=(), notes=(), overall=True):
+def build(scene, camera, objects, picture, fmt, colour=(1.0, 1.0, 1.0), text_size=12.0 * 25.4 / 72.0,
+          own_dims=(), notes=(), overall=True, paper='A3'):
     """Build the overlay sheet.
 
     picture: (path, pixel_w, pixel_h) of the finished render
@@ -125,10 +124,15 @@ def build(scene, camera, objects, picture, fmt, colour=(1.0, 1.0, 1.0), text_siz
     overall: dimension the whole selection when no object has own dimensions
     """
     path, iw, ih = picture
-    page_h = PAGE_W * ih / iw
-    project = _Projector(scene, camera, PAGE_W, page_h)
+    # The picture fills a standard sheet as far as its proportions allow.
+    PAGE_W, page_h = S.PAPER_SIZES[paper]
+    img_w, img_h = PAGE_W, PAGE_W * ih / iw
+    if img_h > page_h:
+        img_w, img_h = page_h * iw / ih, page_h
+    img_x, img_y = (PAGE_W - img_w) / 2.0, (page_h - img_h) / 2.0
+    project = _Projector(scene, camera, img_x, img_y, img_w, img_h)
     unit_scale = scene.unit_settings.scale_length
-    items = [S.Picture(path, 0.0, 0.0, PAGE_W, page_h)]
+    items = [S.Picture(path, img_x, img_y, img_w, img_h)]
     offset = text_size * 1.3
     dim_texts = []
 
@@ -145,13 +149,13 @@ def build(scene, camera, objects, picture, fmt, colour=(1.0, 1.0, 1.0), text_siz
 
     # Notes: leader from the object's centre towards the nearer side of the picture.
     from .export_pdf import text_width
-    note_size = text_size * 0.62
+    note_size = text_size * 0.8
     placed = []
     entries = []
     for ob, text in notes:
         centre = sum((ob.matrix_world @ Vector(c) for c in ob.bound_box), Vector()) / 8.0
         p, z = project(centre)
-        if z > 0.0 and 0.0 <= p[0] <= PAGE_W and 0.0 <= p[1] <= page_h:
+        if z > 0.0 and img_x <= p[0] <= img_x + img_w and img_y <= p[1] <= img_y + img_h:
             entries.append((p, text))
     entries.sort(key=lambda e: e[0][1])
     for (x, y), text in entries:
@@ -170,4 +174,4 @@ def build(scene, camera, objects, picture, fmt, colour=(1.0, 1.0, 1.0), text_siz
                               width=text_size * 0.035, anchor='start' if side > 0 else 'end',
                               bold=True, arrow=0.0))
 
-    return S.Sheet(PAGE_W, page_h, items, {}, 0, "Quotation", fmt)
+    return S.Sheet(PAGE_W, page_h, items, {}, 0, "Quotation", fmt, paper, text_size)

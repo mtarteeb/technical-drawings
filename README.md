@@ -29,6 +29,9 @@ Requires Blender 4.3 or newer (developed and tested on Blender 5.1).
 A sheet with front, top and side views, automatic dimensions, notes, render pictures,
 Pantone swatches and the information strip.
 
+- **Text size**: dimension and note text is always 12 pt on the printed sheet (adjustable), whatever the drawing scale.
+- **Paper**: standard sizes A4 to A0. When the views cannot be drawn large enough for the dimensions to stay readable, the add-on either spreads them over more sheets or steps up to the next paper size (*If It Does Not Fit*).
+- **Decoration**: tick *Decoration (No Dimensions)* on logos and graphics so they are drawn but not dimensioned.
 - **Dimensions** are measured from the model: overall sizes, a chain at every long straight edge, radii of arcs.
 - **Notes**: click an object, type its note (for example `STICKER`) in *Dimensions and Notes*. It appears with an arrow.
 - **Own Dimensions**: tick this on an object whose edges must always be dimensioned.
