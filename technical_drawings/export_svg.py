@@ -50,6 +50,10 @@ def _emit(out, it, images):
     if isinstance(it, S.Fill):
         out.append('<rect x="%s" y="%s" width="%s" height="%s" fill="%s"/>' % (
             _n(it.x), _n(it.y), _n(it.w), _n(it.h), _rgb(it.color)))
+    elif isinstance(it, S.Shape):
+        d = ' '.join(' '.join([c[0]] + [_n(v) for v in c[1:]]) for sub in it.subpaths for c in sub + [('Z',)])
+        out.append('<path d="%s" fill="%s" fill-rule="%s"/>' % (
+            d, _rgb(it.fill), 'evenodd' if it.even_odd else 'nonzero'))
     elif isinstance(it, S.Picture):
         img = images.get(it.path)
         if img:

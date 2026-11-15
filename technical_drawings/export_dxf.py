@@ -224,6 +224,26 @@ def write_dxf(path, sh):
             if it.text:
                 x, y = T((it.x, it.y))
                 wr.text(out, x, y, it.text, it.size * CAP * f, layer, _colour(it), it.anchor, it.rotation)
+        elif isinstance(it, S.Shape):
+            # DXF R12 has no curved fills: the logo is written as its outline.
+            if max(it.fill[:3]) > 0.98:
+                return
+            for sub in it.subpaths:
+                pts, cur = [], None
+                for c in sub:
+                    if c[0] in ('M', 'L'):
+                        cur = (c[1], c[2])
+                        pts.append(T(cur))
+                    else:
+                        x1, y1, x2, y2, x3, y3 = c[1:]
+                        for i in range(1, 13):
+                            t = i / 12.0
+                            u = 1.0 - t
+                            pts.append(T((u ** 3 * cur[0] + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t ** 3 * x3,
+                                          u ** 3 * cur[1] + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t ** 3 * y3)))
+                        cur = (x3, y3)
+                if len(pts) > 2:
+                    wr.polyline(out, pts, layer, 7, closed=True)
         elif isinstance(it, S.Fill):
             x0, y0 = T((it.x, it.y + it.h))
             x1, y1 = T((it.x + it.w, it.y))

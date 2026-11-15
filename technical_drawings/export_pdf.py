@@ -55,6 +55,14 @@ def _page_stream(sh, image_names):
     for it in (prim for raw in sh.items for prim in S.expand(raw)):
         if isinstance(it, S.Fill):
             w('%s %s %s rg %s %s %s %s re f' % (*map(_f, it.color), _f(it.x), _f(it.y), _f(it.w), _f(it.h)))
+        elif isinstance(it, S.Shape):
+            ops = ['%s %s %s rg' % tuple(map(_f, it.fill))]
+            for sub in it.subpaths:
+                for c in sub:
+                    ops.append(' '.join(_f(v) for v in c[1:]) + {'M': ' m', 'L': ' l', 'C': ' c'}[c[0]])
+                ops.append('h')
+            ops.append('f*' if it.even_odd else 'f')
+            w(' '.join(ops))
         elif isinstance(it, S.Picture):
             name = image_names.get(it.path)
             if name:

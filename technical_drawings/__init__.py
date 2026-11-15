@@ -46,6 +46,8 @@ class TD_Settings(PropertyGroup):
     drawing_title: StringProperty(name="Drawing Title",
                                   description="Name of the element on this sheet, e.g. Entrance Arch")
     drawn_by: StringProperty(name="Drawing By")
+    logo: BoolProperty(name="Company Logo", default=True,
+                       description="Show the TARTEEB logo in the information strip")
     notes: StringProperty(
         name="General Notes",
         description="Separate notes with a semicolon ( ; ). The unit and scale notes are added automatically",
@@ -250,7 +252,7 @@ class TD_OT_export(Operator):
                 object_notes=[(o.name, o.td_note.strip()) for o in objects
                               if st.object_notes and o.td_note.strip()],
                 forced_parts=[o.name for o in objects if o.td_own_dims],
-                dim_text_size=st.text_pt * 25.4 / 72.0, fit=st.fit)
+                dim_text_size=st.text_pt * 25.4 / 72.0, fit=st.fit, logo=st.logo)
             sheets = sheet.build_sheets(views, settings)
 
             def numbered(ext, sh):
@@ -505,6 +507,7 @@ class TD_PT_sheet(TD_PT_base, Panel):
         layout.prop(st, "client")
         layout.prop(st, "drawing_title")
         layout.prop(st, "drawn_by")
+        layout.prop(st, "logo")
         layout.prop(st, "notes")
         layout.prop(st, "paper")
         layout.prop(st, "fit")

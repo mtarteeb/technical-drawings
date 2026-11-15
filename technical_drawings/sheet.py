@@ -73,6 +73,36 @@ class Fill:
 
 
 @dataclass
+class Shape:
+    """A filled outline with curves (used for the company logo).
+    subpaths: lists of ('M', x, y) / ('L', x, y) / ('C', x1, y1, x2, y2, x, y)
+    in paper mm; every subpath is closed."""
+    subpaths: list
+    fill: tuple
+    even_odd: bool = False
+    layer: str = "FRAME"
+
+
+def logo_shapes(x, y, width, ink=(0.0, 0.0, 0.0), paper=(1.0, 1.0, 1.0)):
+    """The company logo placed with its top-left corner at (x, y)."""
+    from . import logo_data
+    out = []
+    for kind, even_odd, subs in logo_data.SHAPES:
+        placed = []
+        for sub in subs:
+            cmds = []
+            for c in sub:
+                vals = list(c[1:])
+                for i in range(0, len(vals), 2):
+                    vals[i] = x + vals[i] * width
+                    vals[i + 1] = y + vals[i + 1] * width
+                cmds.append((c[0],) + tuple(vals))
+            placed.append(cmds)
+        out.append(Shape(placed, ink if kind == 'ink' else paper, even_odd))
+    return out
+
+
+@dataclass
 class Picture:
     path: str
     x: float
@@ -211,6 +241,7 @@ class SheetSettings:
     radii: bool = True
     object_notes: list = field(default_factory=list)    # list of (object name, text)
     forced_parts: list = field(default_factory=list)    # object names with their own dimensions
+    logo: bool = True                                   # company logo in the information strip
     dim_text_size: float = 12.0 * 25.4 / 72.0           # dimension text: 12 pt on paper, at any scale
     fit: str = 'SHEETS'                                 # SHEETS = add sheets, PAPER = use bigger paper
 
@@ -331,8 +362,12 @@ def _strip(items, settings, left, right, bottom, strip_top, scale, paper, number
     head_bottom = strip_top + STRIP_HEAD_H
     items.append(Line([(left, head_bottom), (right, head_bottom)], L_FRAME, FRAME_GREY, 0.18))
     total = right - left
-    fractions = [("Project Name", 0.123), ("Client", 0.167), ("General  Notes", 0.358),
-                 ("Pantone Color Code", 0.198), ("Drawing By", 0.154)]
+    if settings.logo:
+        fractions = [("Project Name", 0.118), ("Client", 0.150), ("General  Notes", 0.322),
+                     ("Pantone Color Code", 0.172), ("Drawing By", 0.112), ("Company", 0.126)]
+    else:
+        fractions = [("Project Name", 0.123), ("Client", 0.167), ("General  Notes", 0.358),
+                     ("Pantone Color Code", 0.198), ("Drawing By", 0.154)]
     col_x = [left]
     for _, frac in fractions:
         col_x.append(col_x[-1] + total * frac)
@@ -353,6 +388,13 @@ def _strip(items, settings, left, right, bottom, strip_top, scale, paper, number
         items.append(Text(c0, body_mid, settings.project_name, 3.0, anchor='middle'))
     items.append(Text((col_x[1] + col_x[2]) / 2, body_mid, settings.client, 3.0, anchor='middle'))
     items.append(Text((col_x[4] + col_x[5]) / 2, body_mid, settings.drawn_by, 3.0, anchor='middle'))
+    if settings.logo:
+        from . import logo_data
+        box_w, box_h = col_x[6] - col_x[5], bottom - head_bottom
+        logo_w = min(box_w - 8.0, (box_h - 8.0) / logo_data.ASPECT)
+        logo_h = logo_w * logo_data.ASPECT
+        items.extend(logo_shapes(col_x[5] + (box_w - logo_w) / 2.0,
+                                 head_bottom + (box_h - logo_h) / 2.0, logo_w))
 
     sw = settings.swatches
     if sw:
