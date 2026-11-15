@@ -21,8 +21,28 @@ Requires Blender 4.3 or newer (developed and tested on Blender 5.1).
 
 1. Select the objects you want to draw. Anything not selected (people, props, the venue) is left out.
 2. Open the sidebar in the 3D viewport (press **N**) and choose the **Technicals** tab.
-3. Set the views, sheet information, render pictures, Pantone colours and file formats.
-4. Press **Export Technicals**.
+3. Choose **Production** or **Quotation** at the top.
+4. Set the options, then press **Export Technicals**.
+
+### Production
+
+A sheet with front, top and side views, automatic dimensions, notes, render pictures,
+Pantone swatches and the information strip.
+
+- **Dimensions** are measured from the model: overall sizes, a chain at every long straight edge, radii of arcs.
+- **Notes**: click an object, type its note (for example `STICKER`) in *Dimensions and Notes*. It appears with an arrow.
+- **Own Dimensions**: tick this on an object whose edges must always be dimensioned.
+- **Light strips**: objects with a light-emitting material are drawn in colour.
+- **Files**: PDF, SVG (Illustrator), DXF (AutoCAD, true size, editable dimensions) and CNC outlines (DXF).
+
+### Quotation
+
+Dimensions and notes laid over a finished render, as editable lines and text.
+
+1. Choose the render picture and the camera it was rendered from.
+2. Tick **Own Dimensions** on the objects that should show their width, depth and height.
+   With none ticked, the overall size of the selection is shown.
+3. Export as PDF or SVG.
 
 ## Releasing an update (maintainers)
 
@@ -30,16 +50,12 @@ Requires Blender 4.3 or newer (developed and tested on Blender 5.1).
 2. Commit.
 3. Run `tools/release.sh`.
 
-## Status
+## Known limits
 
-| Feature | State |
-| --- | --- |
-| Front / top / side / back line views from the selection | Working |
-| A-size sheet with information strip, pictures, Pantone swatches | Working |
-| PDF and SVG export | Working |
-| Automatic dimensions and notes | Not built yet |
-| DXF export and CNC outlines | Not built yet |
-| Quotation overlay on a render | Not built yet |
+- Text on the sheet uses Latin characters only (no Arabic yet).
+- Curves become true arcs only where the model's curve is a regular arc; other curves stay as short straight segments.
+- Quotation dimensions are not hidden when another object stands in front of them.
+- DXF files do not contain the render pictures or filled Pantone swatches.
 
 ## License
 

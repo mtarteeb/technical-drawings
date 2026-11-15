@@ -1,17 +1,17 @@
-"""Technical Drawings: production technical sheets from selected objects.
+"""Technical Drawings: production and quotation technicals from selected objects.
 
 Workflow: select the objects to draw, set the options in the sidebar panel
-(View3D > Sidebar > Technicals), press Export.
+(3D Viewport > Sidebar > Technicals), press Export.
 """
 
 import os
 
 import bpy
-from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatVectorProperty,
-                       IntProperty, PointerProperty, StringProperty)
+from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProperty,
+                       FloatVectorProperty, IntProperty, PointerProperty, StringProperty)
 from bpy.types import Operator, Panel, PropertyGroup, UIList
 
-from . import engine, export_pdf, export_svg, images, sheet
+from . import dims, engine, export_dxf, export_pdf, export_svg, images, quotation, sheet
 
 
 class TD_Swatch(PropertyGroup):
@@ -25,7 +25,17 @@ class TD_Picture(PropertyGroup):
                          description="A finished render to place on the sheet")
 
 
+def _camera_poll(self, obj):
+    return obj.type == 'CAMERA'
+
+
 class TD_Settings(PropertyGroup):
+    mode: EnumProperty(
+        name="Drawing Type",
+        items=[('PRODUCTION', "Production", "Sheet with front, top and side views for the workshop"),
+               ('QUOTATION', "Quotation", "Dimensions and notes laid over a finished render")],
+        default='PRODUCTION')
+
     project_name: StringProperty(name="Project Name")
     client: StringProperty(name="Client")
     drawing_title: StringProperty(name="Drawing Title",
@@ -33,8 +43,8 @@ class TD_Settings(PropertyGroup):
     drawn_by: StringProperty(name="Drawing By")
     notes: StringProperty(
         name="General Notes",
-        description="One note per line; separate notes with a semicolon ( ; )",
-        default="ALL DIMENSIONS ARE IN CENTIMETERS UNLESS OTHERWISE SPECIFIED.")
+        description="Separate notes with a semicolon ( ; ). The unit and scale notes are added automatically",
+        default="")
 
     paper: EnumProperty(name="Paper", default='A3',
                         items=[(k, k + " landscape", "") for k in sheet.PAPER_SIZES])
@@ -54,14 +64,53 @@ class TD_Settings(PropertyGroup):
     view_back: BoolProperty(name="Back", default=False)
     hidden_lines: BoolProperty(name="Hidden Lines", default=False,
                                description="Draw edges that are hidden behind other parts as dashed lines")
+    colour_lights: BoolProperty(
+        name="Colour Light Strips", default=True,
+        description="Draw objects whose material emits light in the colour of the light")
+
+    dimensions: BoolProperty(name="Dimensions", default=True,
+                             description="Measure the model and add dimensions automatically")
+    unit: EnumProperty(name="Unit", default='CM',
+                       items=[('CM', "Centimetres", ""), ('MM', "Millimetres", ""),
+                              ('M', "Metres", ""), ('IN', "Inches", "")])
+    decimals: IntProperty(name="Decimals", default=1, min=0, max=3,
+                          description="Most decimal places shown; trailing zeros are dropped")
+    suffix: EnumProperty(name="Unit Text", default='SPACED',
+                         items=[('SPACED', "500 cm", "Number, space, unit"),
+                                ('UPPER', "500CM", "Number and unit in capitals"),
+                                ('NONE', "500", "Number only")])
+    detail: EnumProperty(
+        name="Detail", default='MEDIUM',
+        description="How many intermediate dimensions are added between the overall sizes",
+        items=[('LOW', "Few", "Only the most prominent edges"),
+               ('MEDIUM', "Normal", ""),
+               ('HIGH', "Many", "Also shorter edges")])
+    radii: BoolProperty(name="Radii", default=True, description="Add the radius of arcs and the diameter of circles")
+    object_notes: BoolProperty(name="Object Notes", default=True,
+                               description="Show the notes typed on objects as arrows with text")
 
     swatches: CollectionProperty(type=TD_Swatch)
     swatch_index: IntProperty()
     pictures: CollectionProperty(type=TD_Picture)
     picture_index: IntProperty()
 
+    quote_camera: PointerProperty(name="Camera", type=bpy.types.Object, poll=_camera_poll,
+                                  description="Camera the render was made from. Empty = the scene camera")
+    quote_picture: StringProperty(name="Render", subtype='FILE_PATH',
+                                  description="The finished render made from this camera")
+    quote_colour: FloatVectorProperty(name="Colour", subtype='COLOR', size=3, min=0.0, max=1.0,
+                                      default=(1.0, 1.0, 1.0),
+                                      description="Colour of the dimensions and notes on the picture")
+    quote_text_size: FloatProperty(name="Text Size", default=6.0, min=2.0, max=20.0,
+                                   description="Dimension text size, as millimetres on a 400 mm wide page")
+
     export_pdf: BoolProperty(name="PDF", default=True)
     export_svg: BoolProperty(name="SVG (Illustrator)", default=False)
+    export_dxf: BoolProperty(name="DXF (AutoCAD)", default=False,
+                             description="True-size drawing with editable dimensions. Production only")
+    export_cnc: BoolProperty(
+        name="CNC Outlines (DXF)", default=False,
+        description="Separate DXF with the flat cutting outline of every selected object at true size")
     output_dir: StringProperty(name="Folder", subtype='DIR_PATH', default="//Technicals/",
                                description="Where the drawings are saved")
     file_name: StringProperty(name="File Name", default="",
@@ -83,6 +132,10 @@ def _safe_name(text):
     return keep or "Technical Drawing"
 
 
+def _format(st):
+    return dims.Format(st.unit, st.decimals, st.suffix)
+
+
 class TD_OT_export(Operator):
     bl_idname = "technical_drawings.export"
     bl_label = "Export Technicals"
@@ -99,11 +152,9 @@ class TD_OT_export(Operator):
         if not objects:
             self.report({'ERROR'}, "Select the objects you want to draw first.")
             return {'CANCELLED'}
-        views_wanted = _selected_views(st)
-        if not views_wanted:
-            self.report({'ERROR'}, "Turn on at least one view.")
-            return {'CANCELLED'}
-        if not (st.export_pdf or st.export_svg):
+        quotation_mode = st.mode == 'QUOTATION'
+        formats = [st.export_pdf, st.export_svg] + ([] if quotation_mode else [st.export_dxf, st.export_cnc])
+        if not any(formats):
             self.report({'ERROR'}, "Turn on at least one file format.")
             return {'CANCELLED'}
 
@@ -117,37 +168,66 @@ class TD_OT_export(Operator):
             self.report({'ERROR'}, "Cannot create the folder: %s" % err)
             return {'CANCELLED'}
 
+        base = _safe_name(st.file_name or st.drawing_title or st.project_name)
         try:
-            views = engine.extract_views(
-                objects, views_wanted, engine.FRONT_DIRECTIONS[st.front_direction],
-                frame=context.scene.frame_current, hidden_lines=st.hidden_lines,
-                unit_scale=context.scene.unit_settings.scale_length)
+            if quotation_mode:
+                written, info = self._quotation(context, st, objects, out_dir, base)
+            else:
+                written, info = self._production(context, st, objects, out_dir, base)
         except ValueError as err:
             self.report({'ERROR'}, str(err))
             return {'CANCELLED'}
+        except OSError as err:
+            self.report({'ERROR'}, "Could not save: %s" % err)
+            return {'CANCELLED'}
 
-        image_data, pictures, missing = {}, [], []
-        for pic in st.pictures:
-            if not pic.path:
-                continue
-            loaded = images.load_jpeg(pic.path)
-            if loaded is None:
-                missing.append(os.path.basename(pic.path))
-                continue
-            image_data[pic.path] = loaded
-            pictures.append((pic.path, loaded[1], loaded[2]))
+        self.report({'INFO'}, "Saved %d file(s)%s to %s" % (len(written), info, out_dir))
+        if st.open_after and written and not bpy.app.background:
+            bpy.ops.wm.path_open(filepath=written[0])
+        return {'FINISHED'}
 
-        settings = sheet.SheetSettings(
-            paper=st.paper, project_name=st.project_name, client=st.client,
-            drawing_title=st.drawing_title, drawn_by=st.drawn_by,
-            notes=[n.strip() for n in st.notes.replace("\n", ";").split(";")],
-            swatches=[(s.name, tuple(s.color)) for s in st.swatches],
-            pictures=pictures, hidden_lines=st.hidden_lines)
-        sh = sheet.build_sheet(views, settings)
-
-        base = _safe_name(st.file_name or st.drawing_title or st.project_name)
+    def _production(self, context, st, objects, out_dir, base):
+        views_wanted = _selected_views(st)
+        if not views_wanted:
+            raise ValueError("Turn on at least one view.")
+        scene = context.scene
+        unit_scale = scene.unit_settings.scale_length
+        fmt = _format(st)
         written = []
-        try:
+
+        if st.export_pdf or st.export_svg or st.export_dxf:
+            views = engine.extract_views(
+                objects, views_wanted, engine.FRONT_DIRECTIONS[st.front_direction],
+                frame=scene.frame_current, hidden_lines=st.hidden_lines,
+                colour_lights=st.colour_lights, unit_scale=unit_scale)
+
+            image_data, pictures, missing = {}, [], []
+            for pic in st.pictures:
+                if not pic.path:
+                    continue
+                loaded = images.load_jpeg(pic.path)
+                if loaded is None:
+                    missing.append(os.path.basename(pic.path))
+                    continue
+                image_data[pic.path] = loaded
+                pictures.append((pic.path, loaded[1], loaded[2]))
+            if missing:
+                self.report({'WARNING'}, "Picture not found: " + ", ".join(missing))
+
+            notes = ["ALL DIMENSIONS ARE IN %s UNLESS OTHERWISE SPECIFIED." % {
+                'CM': "CENTIMETERS", 'MM': "MILLIMETERS", 'M': "METERS", 'IN': "INCHES"}[st.unit]]
+            notes += [n.strip() for n in st.notes.replace("\n", ";").split(";")]
+            settings = sheet.SheetSettings(
+                paper=st.paper, project_name=st.project_name, client=st.client,
+                drawing_title=st.drawing_title, drawn_by=st.drawn_by, notes=notes,
+                swatches=[(s.name, tuple(s.color)) for s in st.swatches],
+                pictures=pictures, hidden_lines=st.hidden_lines,
+                dimensions=st.dimensions, fmt=fmt, detail=st.detail, radii=st.radii,
+                object_notes=[(o.name, o.td_note.strip()) for o in objects
+                              if st.object_notes and o.td_note.strip()],
+                forced_parts=[o.name for o in objects if o.td_own_dims])
+            sh = sheet.build_sheet(views, settings)
+
             if st.export_pdf:
                 path = os.path.join(out_dir, base + ".pdf")
                 export_pdf.write_pdf(path, [sh], image_data)
@@ -156,16 +236,60 @@ class TD_OT_export(Operator):
                 path = os.path.join(out_dir, base + ".svg")
                 export_svg.write_svg(path, sh, image_data)
                 written.append(path)
-        except OSError as err:
-            self.report({'ERROR'}, "Could not save: %s" % err)
-            return {'CANCELLED'}
+            if st.export_dxf:
+                path = os.path.join(out_dir, base + ".dxf")
+                export_dxf.write_dxf(path, sh)
+                written.append(path)
+            info = " at scale 1:%d" % sh.scale
+        else:
+            info = ""
 
-        if missing:
-            self.report({'WARNING'}, "Picture not found: " + ", ".join(missing))
-        self.report({'INFO'}, "Saved %d file(s) at scale 1:%d to %s" % (len(written), sh.scale, out_dir))
-        if st.open_after and written and not bpy.app.background:
-            bpy.ops.wm.path_open(filepath=written[0])
-        return {'FINISHED'}
+        if st.export_cnc:
+            outlines = []
+            for ob in objects:
+                result = engine.extract_outline(ob, frame=scene.frame_current, unit_scale=unit_scale)
+                if result:
+                    outlines.append((ob.name,) + result)
+            if outlines:
+                path = os.path.join(out_dir, base + " - CNC.dxf")
+                export_dxf.write_cnc(path, outlines, fmt)
+                written.append(path)
+        return written, info
+
+    def _quotation(self, context, st, objects, out_dir, base):
+        scene = context.scene
+        camera = st.quote_camera or scene.camera
+        if camera is None:
+            raise ValueError("Choose the camera the render was made from.")
+        if not st.quote_picture:
+            raise ValueError("Choose the finished render picture.")
+        loaded = images.load_jpeg(st.quote_picture)
+        if loaded is None:
+            raise ValueError("The render picture could not be read.")
+        render = scene.render
+        cam_aspect = (render.resolution_x * render.pixel_aspect_x) / (render.resolution_y * render.pixel_aspect_y)
+        if abs(loaded[1] / loaded[2] - cam_aspect) > 0.01 * cam_aspect:
+            self.report({'WARNING'}, "The picture's proportions differ from the scene's render size; "
+                                     "dimensions may not line up.")
+        meshes = [o for o in objects if o.type in engine.DRAWABLE_TYPES]
+        sh = quotation.build(
+            scene, camera, meshes, (st.quote_picture, loaded[1], loaded[2]), _format(st),
+            colour=tuple(st.quote_colour), text_size=st.quote_text_size,
+            own_dims=[o for o in meshes if o.td_own_dims],
+            notes=[(o, o.td_note.strip()) for o in meshes if st.object_notes and o.td_note.strip()],
+            overall=st.dimensions)
+        image_data = {st.quote_picture: loaded}
+        base += " - Quotation"
+        written = []
+        if st.export_pdf:
+            path = os.path.join(out_dir, base + ".pdf")
+            export_pdf.write_pdf(path, [sh], image_data)
+            written.append(path)
+        if st.export_svg:
+            path = os.path.join(out_dir, base + ".svg")
+            export_svg.write_svg(path, sh, image_data)
+            written.append(path)
+        return written, ""
 
 
 class TD_OT_list_add(Operator):
@@ -199,6 +323,24 @@ class TD_OT_list_remove(Operator):
         return {'FINISHED'}
 
 
+class TD_OT_note_to_selected(Operator):
+    bl_idname = "technical_drawings.note_to_selected"
+    bl_label = "Copy to Selected"
+    bl_description = "Give every selected object the same note and dimension setting as the active object"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object is not None
+
+    def execute(self, context):
+        src = context.active_object
+        for ob in context.selected_objects:
+            ob.td_note = src.td_note
+            ob.td_own_dims = src.td_own_dims
+        return {'FINISHED'}
+
+
 class TD_UL_swatches(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         row = layout.row(align=True)
@@ -216,6 +358,12 @@ class TD_PT_base:
     bl_region_type = 'UI'
     bl_category = "Technicals"
 
+    @staticmethod
+    def _split(layout):
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        return layout
+
 
 class TD_PT_main(TD_PT_base, Panel):
     bl_idname = "TD_PT_main"
@@ -224,6 +372,7 @@ class TD_PT_main(TD_PT_base, Panel):
     def draw(self, context):
         st = context.scene.technical_drawings
         layout = self.layout
+        layout.prop(st, "mode", expand=True)
         count = sum(1 for o in context.selected_objects if engine.is_drawable(o))
         box = layout.box()
         box.label(text="%d object(s) selected to draw" % count,
@@ -233,15 +382,34 @@ class TD_PT_main(TD_PT_base, Panel):
         col.operator(TD_OT_export.bl_idname, icon='EXPORT')
 
 
+class TD_PT_quotation(TD_PT_base, Panel):
+    bl_parent_id = "TD_PT_main"
+    bl_label = "Render"
+
+    @classmethod
+    def poll(cls, context):
+        return context.scene.technical_drawings.mode == 'QUOTATION'
+
+    def draw(self, context):
+        st = context.scene.technical_drawings
+        layout = self._split(self.layout)
+        layout.prop(st, "quote_picture")
+        layout.prop(st, "quote_camera")
+        layout.prop(st, "quote_colour")
+        layout.prop(st, "quote_text_size")
+
+
 class TD_PT_views(TD_PT_base, Panel):
     bl_parent_id = "TD_PT_main"
     bl_label = "Views"
 
+    @classmethod
+    def poll(cls, context):
+        return context.scene.technical_drawings.mode == 'PRODUCTION'
+
     def draw(self, context):
         st = context.scene.technical_drawings
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
+        layout = self._split(self.layout)
         layout.prop(st, "front_direction")
         col = layout.column(heading="Show", align=True)
         col.prop(st, "view_front")
@@ -249,18 +417,51 @@ class TD_PT_views(TD_PT_base, Panel):
         col.prop(st, "view_right")
         col.prop(st, "view_left")
         col.prop(st, "view_back")
-        layout.prop(st, "hidden_lines")
+        col = layout.column(heading="Lines", align=True)
+        col.prop(st, "hidden_lines")
+        col.prop(st, "colour_lights")
+
+
+class TD_PT_dimensions(TD_PT_base, Panel):
+    bl_parent_id = "TD_PT_main"
+    bl_label = "Dimensions and Notes"
+
+    def draw(self, context):
+        st = context.scene.technical_drawings
+        layout = self._split(self.layout)
+        layout.prop(st, "dimensions")
+        col = layout.column()
+        col.active = st.dimensions
+        col.prop(st, "unit")
+        col.prop(st, "suffix")
+        col.prop(st, "decimals")
+        if st.mode == 'PRODUCTION':
+            col.prop(st, "detail")
+            col.prop(st, "radii")
+        layout.prop(st, "object_notes")
+
+        ob = context.active_object
+        box = self.layout.box()
+        if ob is None:
+            box.label(text="Click an object to give it a note", icon='INFO')
+            return
+        box.label(text=ob.name, icon='OBJECT_DATA')
+        box.prop(ob, "td_note", text="Note")
+        box.prop(ob, "td_own_dims")
+        box.operator(TD_OT_note_to_selected.bl_idname, icon='COPYDOWN')
 
 
 class TD_PT_sheet(TD_PT_base, Panel):
     bl_parent_id = "TD_PT_main"
     bl_label = "Sheet Information"
 
+    @classmethod
+    def poll(cls, context):
+        return context.scene.technical_drawings.mode == 'PRODUCTION'
+
     def draw(self, context):
         st = context.scene.technical_drawings
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
+        layout = self._split(self.layout)
         layout.prop(st, "project_name")
         layout.prop(st, "client")
         layout.prop(st, "drawing_title")
@@ -273,6 +474,10 @@ class TD_PT_pictures(TD_PT_base, Panel):
     bl_parent_id = "TD_PT_main"
     bl_label = "Render Pictures"
     bl_options = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.scene.technical_drawings.mode == 'PRODUCTION'
 
     def draw(self, context):
         st = context.scene.technical_drawings
@@ -287,6 +492,10 @@ class TD_PT_swatches(TD_PT_base, Panel):
     bl_parent_id = "TD_PT_main"
     bl_label = "Pantone Colours"
     bl_options = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.scene.technical_drawings.mode == 'PRODUCTION'
 
     def draw(self, context):
         st = context.scene.technical_drawings
@@ -303,12 +512,13 @@ class TD_PT_output(TD_PT_base, Panel):
 
     def draw(self, context):
         st = context.scene.technical_drawings
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
+        layout = self._split(self.layout)
         col = layout.column(heading="Formats", align=True)
         col.prop(st, "export_pdf")
         col.prop(st, "export_svg")
+        if st.mode == 'PRODUCTION':
+            col.prop(st, "export_dxf")
+            col.prop(st, "export_cnc")
         layout.prop(st, "output_dir")
         layout.prop(st, "file_name")
         layout.prop(st, "open_after")
@@ -316,9 +526,10 @@ class TD_PT_output(TD_PT_base, Panel):
 
 classes = (
     TD_Swatch, TD_Picture, TD_Settings,
-    TD_OT_export, TD_OT_list_add, TD_OT_list_remove,
+    TD_OT_export, TD_OT_list_add, TD_OT_list_remove, TD_OT_note_to_selected,
     TD_UL_swatches, TD_UL_pictures,
-    TD_PT_main, TD_PT_views, TD_PT_sheet, TD_PT_pictures, TD_PT_swatches, TD_PT_output,
+    TD_PT_main, TD_PT_quotation, TD_PT_views, TD_PT_dimensions, TD_PT_sheet,
+    TD_PT_pictures, TD_PT_swatches, TD_PT_output,
 )
 
 
@@ -326,9 +537,18 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
     bpy.types.Scene.technical_drawings = PointerProperty(type=TD_Settings)
+    bpy.types.Object.td_note = StringProperty(
+        name="Technical Note",
+        description="Text shown with an arrow pointing at this object, e.g. STICKER or WARM COB LIGHT")
+    bpy.types.Object.td_own_dims = BoolProperty(
+        name="Own Dimensions",
+        description="Always dimension this object: its edges are kept in the production chains, "
+                    "and it gets its own width, depth and height on quotation pictures")
 
 
 def unregister():
+    del bpy.types.Object.td_own_dims
+    del bpy.types.Object.td_note
     del bpy.types.Scene.technical_drawings
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

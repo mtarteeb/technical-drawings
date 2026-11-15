@@ -52,7 +52,7 @@ def _page_stream(sh, image_names):
     w('%s 0 0 %s 0 %s cm' % (_f(MM), _f(-MM), _f(sh.height * MM)))
     w('1 J 1 j')
     state = None
-    for it in sh.items:
+    for it in (prim for raw in sh.items for prim in S.expand(raw)):
         if isinstance(it, S.Fill):
             w('%s %s %s rg %s %s %s %s re f' % (*map(_f, it.color), _f(it.x), _f(it.y), _f(it.w), _f(it.h)))
         elif isinstance(it, S.Picture):
@@ -70,7 +70,11 @@ def _page_stream(sh, image_names):
             p = it.points
             seg = ['%s %s m' % (_f(p[0][0]), _f(p[0][1]))]
             seg += ['%s %s l' % (_f(x), _f(y)) for x, y in p[1:]]
-            seg.append('h S' if it.closed else 'S')
+            if it.fill is not None:
+                w('%s %s %s rg' % tuple(map(_f, it.fill)))
+                seg.append('h B' if it.width > 0 else 'h f')
+            else:
+                seg.append('h S' if it.closed else 'S')
             w(' '.join(seg))
         elif isinstance(it, S.Text):
             if not it.text:
