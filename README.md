@@ -15,6 +15,8 @@ Geometry only: no AI, works offline, same result every time.
 
 Updates then appear inside Blender under Get Extensions; press **Update**.
 
+If the add-on was installed from a zip file instead, it checks for new versions itself: a red **Update available** box appears at the top of the Technicals panel and in **Preferences > Add-ons > Technical Drawings**. Press **Update Now**. This needs *Allow Online Access* switched on in Preferences > System.
+
 Requires Blender 4.3 or newer (developed and tested on Blender 5.1).
 
 ## Use

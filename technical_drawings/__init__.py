@@ -9,9 +9,9 @@ import os
 import bpy
 from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProperty,
                        FloatVectorProperty, IntProperty, PointerProperty, StringProperty)
-from bpy.types import Operator, Panel, PropertyGroup, UIList
+from bpy.types import AddonPreferences, Operator, Panel, PropertyGroup, UIList
 
-from . import dims, engine, export_dxf, export_pdf, export_svg, images, quotation, sheet
+from . import dims, engine, export_dxf, export_pdf, export_svg, images, quotation, sheet, updater
 
 
 class TD_Swatch(PropertyGroup):
@@ -397,6 +397,73 @@ class TD_OT_note_to_selected(Operator):
         return {'FINISHED'}
 
 
+class TD_OT_check_update(Operator):
+    bl_idname = "technical_drawings.check_update"
+    bl_label = "Check for Updates"
+    bl_description = "Look for a newer version of Technical Drawings"
+
+    def execute(self, context):
+        if not updater.online_allowed():
+            self.report({'ERROR'}, "Turn on Allow Online Access in Preferences > System first.")
+            return {'CANCELLED'}
+        updater.check_in_background()
+        return {'FINISHED'}
+
+
+class TD_OT_install_update(Operator):
+    bl_idname = "technical_drawings.install_update"
+    bl_label = "Update Now"
+    bl_description = "Download and install the newest version. Your settings and files are kept"
+
+    def execute(self, context):
+        if not updater.online_allowed():
+            self.report({'ERROR'}, "Turn on Allow Online Access in Preferences > System first.")
+            return {'CANCELLED'}
+        updater.state.update(status='INSTALLING', message="Updating...")
+        # Run just after this button finishes, because the update replaces this add-on's own code.
+        bpy.app.timers.register(lambda: (updater.install(), None)[1], first_interval=0.2)
+        return {'FINISHED'}
+
+
+def _draw_update(layout, compact=False):
+    """Update status and buttons, shared by the preferences and the panel."""
+    st = updater.state
+    status = st['status']
+    if updater.managed_by_blender():
+        if not compact:
+            layout.label(text="Version %s. Updates arrive through Get Extensions." % updater.current_version(),
+                         icon='CHECKMARK')
+        return
+    if status == 'AVAILABLE':
+        box = layout.box()
+        box.alert = True
+        box.label(text="Update available: version %s" % st['latest'], icon='IMPORT')
+        box.operator(TD_OT_install_update.bl_idname, icon='IMPORT')
+        return
+    if status == 'INSTALLING':
+        layout.label(text=st['message'] or "Updating...", icon='SORTTIME')
+        return
+    if compact:
+        return
+    layout.label(text="Installed version: %s" % updater.current_version())
+    if not updater.online_allowed():
+        layout.label(text="Allow Online Access is off (Preferences > System), so updates cannot be checked.",
+                     icon='ERROR')
+        return
+    if status == 'CHECKING':
+        layout.label(text="Checking for updates...", icon='SORTTIME')
+    elif st['message']:
+        layout.label(text=st['message'], icon='ERROR' if status == 'ERROR' else 'CHECKMARK')
+    layout.operator(TD_OT_check_update.bl_idname, icon='FILE_REFRESH')
+
+
+class TD_Preferences(AddonPreferences):
+    bl_idname = __package__
+
+    def draw(self, context):
+        _draw_update(self.layout)
+
+
 class TD_UL_swatches(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
         row = layout.row(align=True)
@@ -428,6 +495,7 @@ class TD_PT_main(TD_PT_base, Panel):
     def draw(self, context):
         st = context.scene.technical_drawings
         layout = self.layout
+        _draw_update(layout, compact=True)
         layout.prop(st, "mode", expand=True)
         count = sum(1 for o in context.selected_objects if engine.is_drawable(o))
         box = layout.box()
@@ -594,6 +662,7 @@ class TD_PT_output(TD_PT_base, Panel):
 
 classes = (
     TD_Swatch, TD_Picture, TD_Settings,
+    TD_Preferences, TD_OT_check_update, TD_OT_install_update,
     TD_OT_export, TD_OT_list_add, TD_OT_list_remove, TD_OT_note_to_selected,
     TD_UL_swatches, TD_UL_pictures,
     TD_PT_main, TD_PT_quotation, TD_PT_views, TD_PT_dimensions, TD_PT_sheet,
@@ -620,7 +689,14 @@ def register():
                     "Text objects are treated this way automatically")
 
 
+    # Look for a newer version once, shortly after Blender starts.
+    if not bpy.app.timers.is_registered(updater.startup_check):
+        bpy.app.timers.register(updater.startup_check, first_interval=3.0)
+
+
 def unregister():
+    if bpy.app.timers.is_registered(updater.startup_check):
+        bpy.app.timers.unregister(updater.startup_check)
     del bpy.types.Object.td_no_dims
     del bpy.types.Object.td_own_dims
     del bpy.types.Object.td_note
