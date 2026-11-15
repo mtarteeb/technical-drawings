@@ -254,7 +254,15 @@ class SheetSettings:
     radii: bool = True
     object_notes: list = field(default_factory=list)    # list of (object name, text)
     forced_parts: list = field(default_factory=list)    # object names with their own dimensions
-    logo: bool = True                                   # company logo in the information strip
+    logo: bool = True                                   # company logo in the title block
+    layout: str = 'TEMPLATE'                            # TEMPLATE = company title block, STRIP = bottom strip
+    checked_by: str = ""
+    approved_by: str = ""
+    date: str = ""
+    architect: str = ""
+    project_no: str = ""
+    drawing_no: str = ""
+    revision_no: str = ""
     dim_text_size: float = 12.0 * 25.4 / 72.0           # dimension text: 12 pt on paper, at any scale
     fit: str = 'ONE'                                    # ONE = one sheet, PAPER = bigger paper, SHEETS = split views
 
@@ -652,8 +660,127 @@ def _view_notes(items, pl, notes, size):
         items.append(Leader([anchor, (x_text - 3.0, y), (x_text, y)], text, size, L_NOTES))
 
 
-def _areas(paper, has_pictures):
+def _wrap(text, size, width):
+    """Break text into lines no wider than `width`."""
+    from .export_pdf import text_width
+    lines, line = [], ""
+    for word in text.split():
+        trial = (line + " " + word).strip()
+        if line and text_width(trial, size) > width:
+            lines.append(line)
+            line = word
+        else:
+            line = trial
+    if line:
+        lines.append(line)
+    return lines
+
+
+# Title block of the company template, in millimetres on A3 (scaled for other sizes).
+_LABELS = [            # text, x, baseline y, font size
+    ("GENERAL NOTES", 364.4, 16.8, 2.5), ("PROJECT NAME:", 363.0, 126.4, 2.5),
+    ("DRAWING TITLE:", 363.0, 139.5, 2.5), ("DRAWN BY:", 363.0, 153.7, 2.5),
+    ("CHECKED BY:", 387.6, 153.7, 2.5), ("APPROVED BY:", 362.8, 164.9, 2.5),
+    ("DATE:", 387.5, 164.9, 2.5), ("COMPANY NAME:", 362.9, 177.8, 2.5),
+    ("ARCHITECT:", 362.8, 212.3, 2.5), ("PROJECT NO:", 362.9, 245.7, 1.67),
+    ("SCALE", 388.4, 245.7, 1.67), ("SHEET SIZE", 399.2, 245.7, 1.67),
+    ("DRAWING NO:", 362.9, 256.9, 1.67), ("SHEET NO:", 387.7, 256.9, 1.67),
+    ("REVISION NO:", 362.9, 268.3, 1.67), ("UNIT:", 362.9, 279.4, 1.67),
+]
+_UNIT_WORDS = {'CM': "CENTIMETER", 'MM': "MILLIMETER", 'M': "METER", 'IN': "INCH"}
+
+
+def _title_block(items, settings, paper, scale, number, count):
+    """The company title block down the right-hand side of the sheet."""
+    from . import template_data
+    from .export_pdf import text_width
+    f = PAPER_SIZES[paper][0] / 420.0
+
+    def fit(text, size, width):
+        """Shrink text that is too wide for its box."""
+        w = text_width(text, size)
+        return size if w <= width or not text else size * width / w
+
+    for i, outline in enumerate(template_data.FRAME):
+        items.append(Line([(x * f, y * f) for x, y in outline], L_FRAME, BLACK,
+                          0.35 if i == 0 else 0.18, closed=True))
+    for part in template_data.COMPASS:
+        if part[0] == 'fill':
+            subs = [[(c[0],) + tuple(v * f for v in c[1:]) for c in sub] for sub in part[2]]
+            items.append(Shape(subs, part[1]))
+        else:
+            items.append(Line([(x * f, y * f) for x, y in part[2]], L_FRAME, part[1], 0.18, closed=part[3]))
+    for text, x, y, size in _LABELS:
+        items.append(Text(x * f, y * f, text, size * f, L_TEXT, BLACK))
+
+    def value(text, cx, y, size, width):
+        if text:
+            size = fit(text, size * f, width * f)
+            items.append(Text(cx * f, y * f, text, size, L_TEXT, BLACK, anchor='middle'))
+
+    value(settings.project_name.upper(), 385.0, 131.3, 4.5, 44.0)
+    value(settings.drawing_title.upper(), 385.0, 144.9, 3.2, 44.0)
+    value(settings.drawn_by, 372.5, 158.0, 2.4, 20.0)
+    value(settings.checked_by, 397.5, 158.0, 2.4, 20.0)
+    value(settings.approved_by, 372.5, 169.2, 2.4, 20.0)
+    value(settings.date, 397.5, 169.2, 2.4, 20.0)
+    value(settings.project_no, 372.5, 250.4, 2.4, 20.0)
+    value("1:%d" % scale, 391.25, 250.4, 2.2, 8.5)
+    value(paper, 403.75, 250.6, 3.4, 8.5)
+    value(settings.drawing_no, 372.5, 261.6, 2.4, 20.0)
+    value("%d OF %d" % (number, count), 397.5, 261.6, 2.0, 20.0)
+    value(settings.revision_no, 372.5, 273.0, 2.4, 20.0)
+    value(_UNIT_WORDS.get(settings.fmt.unit, ""), 372.5, 282.5, 2.1, 20.0)
+
+    # Architect: wrapped text inside its box.
+    y = 219.0
+    for line in _wrap(settings.architect, 2.6, 43.0)[:5]:
+        items.append(Text(385.0 * f, y * f, line, 2.6 * f, L_TEXT, BLACK, anchor='middle'))
+        y += 4.0
+
+    if settings.logo:
+        items.extend(logo_shapes(372.3 * f, 186.8 * f, 26.1 * f))
+
+    # General notes: numbered and wrapped inside the notes box.
+    notes = [n.strip() for n in settings.notes if n.strip()]
+    size, y = 2.2, 23.0
+    for i, note in enumerate(notes):
+        lines = _wrap(note, size, 38.0)
+        if y + len(lines) * 3.3 > 104.0:
+            break
+        items.append(Text(364.4 * f, y * f, "%d." % (i + 1), size * f, L_TEXT, BLACK))
+        for line in lines:
+            items.append(Text(369.0 * f, y * f, line, size * f, L_TEXT, BLACK))
+            y += 3.3
+        y += 1.5
+
+    # Pantone swatches sit at the bottom of the notes box.
+    sw = settings.swatches[:4]
+    if sw:
+        box, gap = 8.0, 3.2
+        sx = 385.0 - (len(sw) * box + (len(sw) - 1) * gap) / 2.0
+        for name, color in sw:
+            rgb = tuple(color[:3])
+            items.append(Fill(sx * f, 106.0 * f, box * f, box * f, rgb))
+            light = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2] > 0.6
+            items.append(Text((sx + box / 2) * f, 117.3 * f, name, fit(name, 1.4 * f, (box + gap - 0.6) * f),
+                              L_TEXT, GREY if light else rgb, bold=True, anchor='middle'))
+            sx += box + gap
+
+
+def _areas(paper, has_pictures, layout='TEMPLATE'):
     pw, ph = PAPER_SIZES[paper]
+    if layout == 'TEMPLATE':
+        f = pw / 420.0
+        left, right = 8.0 * f, 360.0 * f           # the title block starts at 360 mm on A3
+        top, bottom = 8.0 * f, 289.0 * f
+        strip_top = bottom
+        area_left = left + 4.0
+        col_w = (right - left) * 0.28 if has_pictures else 0.0
+        views_left = area_left + (col_w + 6.0 if has_pictures else 0.0)
+        return dict(pw=pw, ph=ph, left=left, right=right, top=top, bottom=bottom, strip_top=strip_top,
+                    area_left=area_left, area_top=top + 4.0, area_bottom=bottom - 4.0,
+                    col_w=col_w, views_left=views_left)
     left, right = MARGIN, pw - MARGIN
     top, bottom = MARGIN, ph - MARGIN
     strip_top = bottom - STRIP_H
@@ -682,8 +809,8 @@ def _margins(views, settings, notes_by_view):
     return out
 
 
-def _fit_scale(views, paper, has_pictures, margins):
-    a = _areas(paper, has_pictures)
+def _fit_scale(views, paper, has_pictures, margins, layout='TEMPLATE'):
+    a = _areas(paper, has_pictures, layout)
     avail_w = a['right'] - a['views_left'] - 4.0
     avail_h = a['area_bottom'] - a['area_top']
     best = None
@@ -732,7 +859,7 @@ def _plan(views, settings, margins):
         worst = 0
         for i, group in enumerate(groups):
             sub = {n: views[n] for n in group}
-            s = _fit_scale(sub, paper, has_pics and i == 0, margins)
+            s = _fit_scale(sub, paper, has_pics and i == 0, margins, settings.layout)
             if s is None:
                 return None
             worst = max(worst, s)
@@ -770,11 +897,12 @@ def _plan(views, settings, margins):
 
 
 def _build_one(views, settings, paper, scale, notes_by_view, margins, pictures, number, count):
-    a = _areas(paper, bool(pictures))
+    a = _areas(paper, bool(pictures), settings.layout)
     pw, ph = a['pw'], a['ph']
     left, right, top, bottom, strip_top = a['left'], a['right'], a['top'], a['bottom'], a['strip_top']
-    items = [Line([(left, top), (right, top), (right, bottom), (left, bottom)],
-                  L_FRAME, FRAME_GREY, 0.25, closed=True)]
+    template = settings.layout == 'TEMPLATE'
+    items = [] if template else [Line([(left, top), (right, top), (right, bottom), (left, bottom)],
+                                      L_FRAME, FRAME_GREY, 0.25, closed=True)]
     if pictures:
         _pictures(items, pictures[:3], a['area_left'], a['area_top'], a['area_bottom'], a['col_w'])
 
@@ -819,7 +947,10 @@ def _build_one(views, settings, paper, scale, notes_by_view, margins, pictures, 
             _view_dimensions(items, pl, settings)
         _view_notes(items, pl, notes_by_view[name], size)
 
-    _strip(items, settings, left, right, bottom, strip_top, scale, paper, number, count)
+    if template:
+        _title_block(items, settings, paper, scale, number, count)
+    else:
+        _strip(items, settings, left, right, bottom, strip_top, scale, paper, number, count)
     return Sheet(pw, ph, items, placements, scale, settings.drawing_title, settings.fmt,
                  paper, size, number, count)
 

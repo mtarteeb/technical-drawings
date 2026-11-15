@@ -4,6 +4,7 @@ Workflow: select the objects to draw, set the options in the sidebar panel
 (3D Viewport > Sidebar > Technicals), press Export.
 """
 
+import datetime
 import os
 
 import bpy
@@ -45,7 +46,18 @@ class TD_Settings(PropertyGroup):
     client: StringProperty(name="Client")
     drawing_title: StringProperty(name="Drawing Title",
                                   description="Name of the element on this sheet, e.g. Entrance Arch")
-    drawn_by: StringProperty(name="Drawing By")
+    layout: EnumProperty(
+        name="Title Block", default='TEMPLATE',
+        items=[('TEMPLATE', "TARTEEB Template", "The company A3 template: title block down the right side"),
+               ('STRIP', "Bottom Strip", "Information strip along the bottom of the sheet")])
+    checked_by: StringProperty(name="Checked By")
+    approved_by: StringProperty(name="Approved By")
+    date: StringProperty(name="Date", description="Leave empty to use today's date")
+    architect: StringProperty(name="Architect")
+    project_no: StringProperty(name="Project No")
+    drawing_no: StringProperty(name="Drawing No")
+    revision_no: StringProperty(name="Revision No")
+    drawn_by: StringProperty(name="Drawn By")
     logo: BoolProperty(name="Company Logo", default=True,
                        description="Show the TARTEEB logo in the information strip")
     notes: StringProperty(
@@ -258,8 +270,10 @@ class TD_OT_export(Operator):
             if missing:
                 self.report({'WARNING'}, "Picture could not be made: " + ", ".join(missing))
 
-            notes = ["ALL DIMENSIONS ARE IN %s UNLESS OTHERWISE SPECIFIED." % {
-                'CM': "CENTIMETERS", 'MM': "MILLIMETERS", 'M': "METERS", 'IN': "INCHES"}[st.unit]]
+            # The template has its own Unit, Scale and Sheet No boxes; the strip writes them as notes.
+            notes = [] if st.layout == 'TEMPLATE' else [
+                "ALL DIMENSIONS ARE IN %s UNLESS OTHERWISE SPECIFIED." % {
+                    'CM': "CENTIMETERS", 'MM': "MILLIMETERS", 'M': "METERS", 'IN': "INCHES"}[st.unit]]
             notes += [n.strip() for n in st.notes.replace("\n", ";").split(";")]
             settings = sheet.SheetSettings(
                 paper=st.paper, project_name=st.project_name, client=st.client,
@@ -270,7 +284,11 @@ class TD_OT_export(Operator):
                 object_notes=[(o.name, o.td_note.strip()) for o in objects
                               if st.object_notes and o.td_note.strip()],
                 forced_parts=[o.name for o in objects if o.td_own_dims],
-                dim_text_size=st.text_pt * 25.4 / 72.0, fit=st.fit, logo=st.logo)
+                dim_text_size=st.text_pt * 25.4 / 72.0, fit=st.fit, logo=st.logo,
+                layout=st.layout, checked_by=st.checked_by, approved_by=st.approved_by,
+                date=st.date or datetime.date.today().strftime("%d-%m-%Y"),
+                architect=st.architect, project_no=st.project_no, drawing_no=st.drawing_no,
+                revision_no=st.revision_no)
             sheets = sheet.build_sheets(views, settings)
 
             def numbered(ext, sh):
@@ -601,10 +619,21 @@ class TD_PT_sheet(TD_PT_base, Panel):
     def draw(self, context):
         st = context.scene.technical_drawings
         layout = self._split(self.layout)
+        layout.prop(st, "layout")
         layout.prop(st, "project_name")
-        layout.prop(st, "client")
         layout.prop(st, "drawing_title")
-        layout.prop(st, "drawn_by")
+        if st.layout == 'TEMPLATE':
+            layout.prop(st, "drawn_by")
+            layout.prop(st, "checked_by")
+            layout.prop(st, "approved_by")
+            layout.prop(st, "date")
+            layout.prop(st, "architect")
+            layout.prop(st, "project_no")
+            layout.prop(st, "drawing_no")
+            layout.prop(st, "revision_no")
+        else:
+            layout.prop(st, "client")
+            layout.prop(st, "drawn_by")
         layout.prop(st, "logo")
         layout.prop(st, "notes")
         layout.prop(st, "paper")

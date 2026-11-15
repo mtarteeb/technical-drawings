@@ -29,6 +29,7 @@ Requires Blender 4.3 or newer (developed and tested on Blender 5.1).
 A sheet with front, top and side views, automatic dimensions, notes, render pictures,
 Pantone swatches and the information strip.
 
+- **Title block**: the TARTEEB A3 template is the default sheet: frame, title block down the right side (general notes, project name, drawing title, drawn/checked/approved by, date, company logo, architect, project/drawing/revision no, scale, sheet size, sheet no, unit) and north symbol. Scale, sheet size, sheet number, unit and date are filled in automatically. On other paper sizes the template is scaled in proportion. The earlier bottom-strip layout is still available under *Title Block*.
 - **Text size**: dimension and note text is always 12 pt on the printed sheet (adjustable), whatever the drawing scale.
 - **Paper**: standard sizes A4 to A0. By default front, side and top go together on one sheet and the drawing is scaled to fit. Under *Sheets* you can instead step up to bigger paper, or split the views over several sheets, when the dimensions would be cramped.
 - **Company logo**: the TARTEEB logo is drawn in black in its own *Company* box of the information strip (can be switched off under *Sheet Information*).
