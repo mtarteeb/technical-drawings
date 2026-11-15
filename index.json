@@ -1,0 +1,25 @@
+{
+  "version": "v1",
+  "blocklist": [],
+  "data": [
+    {
+      "schema_version": "1.0.0",
+      "id": "technical_drawings",
+      "name": "Technical Drawings",
+      "tagline": "Technical drawing sheets from selected objects",
+      "version": "0.2.0",
+      "type": "add-on",
+      "maintainer": "TARTEEB",
+      "license": [
+        "SPDX:GPL-3.0-or-later"
+      ],
+      "blender_version_min": "4.3.0",
+      "permissions": {
+        "files": "Save drawings (PDF, SVG, DXF) and read render pictures"
+      },
+      "archive_url": "./technical_drawings-0.2.0.zip",
+      "archive_size": 14728,
+      "archive_hash": "sha256:bd1a30345006016efd7bb2a5ecff3c313b13c03bb461ee1efa345c4c89a925f6"
+    }
+  ]
+}
