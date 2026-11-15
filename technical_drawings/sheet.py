@@ -126,7 +126,7 @@ class Dim:
     color: tuple = DIM_GREY
     width: float = 0.10
     bold: bool = False
-    text_level: int = 0          # 0 = above the line; 1, 2 = below it (text too wide for the gap)
+    text_level: int = 0          # 0 = on the line; -1 = a second row further out; 1, 2 = on the other side
     text_shift: float = 0.0      # slide the text along the line, as a share of its length
 
     def text_position(self):
@@ -139,7 +139,10 @@ class Dim:
         if ux < -1e-9 or (abs(ux) <= 1e-9 and uy > 0):
             ux, uy = -ux, -uy
         nx, ny = uy, -ux                      # "above" the line as it is read
-        off = self.size * (0.32 if self.text_level == 0 else -(0.95 + 1.1 * (self.text_level - 1)))
+        if self.text_level <= 0:
+            off = self.size * (0.32 + 1.15 * -self.text_level)
+        else:
+            off = -self.size * (0.95 + 1.1 * (self.text_level - 1))
         mx = (ax + bx) / 2.0 + ux * length * self.text_shift
         my = (ay + by) / 2.0 + uy * length * self.text_shift
         return mx + nx * off, my + ny * off, math.degrees(math.atan2(-uy, ux))
@@ -193,10 +196,20 @@ def _expand_dim(d):
                         d.layer, d.color, d.width * 2.2))
     out.append(Line([d.a, d.b], d.layer, d.color, d.width))
     tx, ty, rotation = d.text_position()
-    if d.text_level and abs(d.text_shift) > 1e-6:
-        # The text was slid away from its gap: tie it back with a short line.
+    if d.text_level == 0 and abs(d.text_shift) > 0.5:
+        # Text sits outside the gap: carry the dimension line on underneath it.
+        from .export_pdf import text_width
+        half = text_width(d.text, d.size, d.bold) / 2.0 + 0.6
+        side = 1.0 if d.text_shift > 0 else -1.0
+        cx = (ax + bx) / 2.0 + ux * length * d.text_shift
+        cy = (ay + by) / 2.0 + uy * length * d.text_shift
+        near = ((ax + bx) / 2.0 + ux * side * length / 2.0, (ay + by) / 2.0 + uy * side * length / 2.0)
+        out.append(Line([near, (cx + ux * side * half, cy + uy * side * half)], d.layer, d.color, d.width))
+    if d.text_level:
+        # The text is not on its own gap: tie it back with a short line.
+        reach = -0.12 if d.text_level < 0 else 0.8
         out.append(Line([((ax + bx) / 2.0, (ay + by) / 2.0),
-                         (tx + nx * d.size * 0.8, ty + ny * d.size * 0.8)],
+                         (tx + nx * d.size * reach, ty + ny * d.size * reach)],
                         d.layer, d.color, d.width))
     out.append(Text(tx, ty, d.text, d.size, d.layer, d.color,
                     bold=d.bold, anchor='middle', rotation=rotation))
@@ -438,38 +451,51 @@ def _pictures(items, pics, area_left, area_top, area_bottom, col_w):
         py += slot_h + 6.0
 
 
-def _chain(items, pairs, texts, size):
-    """Add a chain of dimensions; text that is wider than its gap drops below
-    the line, alternating between two rows so neighbours do not collide."""
+def _chain(items, pairs, texts, size, start_outside=True, outer_level=1):
+    """Add a chain of dimensions (or a single one).
+
+    Text that is wider than its gap is never dropped. At either end of the
+    chain it moves outside, beside the gap, on an extended dimension line
+    (normal drafting practice). In the middle of a chain it moves to a second
+    row further out, tied to its gap by a short line, and slides along until
+    it is clear of its neighbours.
+    """
     from .export_pdf import text_width
     if not pairs:
         return
-    # Position along the chain, measured in the reading direction.
     a0, b_last = pairs[0][2], pairs[-1][3]
     total = math.hypot(b_last[0] - a0[0], b_last[1] - a0[1]) or 1.0
     ux, uy = (b_last[0] - a0[0]) / total, (b_last[1] - a0[1]) / total
-    flip = ux < -1e-9 or (abs(ux) <= 1e-9 and uy > 0)      # same rule as Dim.text_position
-    cursor = None            # end of the last text placed below the line
-    order = list(zip(pairs, texts))
-    if flip:
-        order.reverse()
-    for (p0, p1, a, b), text in order:
-        gap = math.hypot(b[0] - a[0], b[1] - a[1])
+    if ux < -1e-9 or (abs(ux) <= 1e-9 and uy > 0):       # reading direction, as in Dim.text_position
+        ux, uy = -ux, -uy
+
+    def along(p):
+        return (p[0] - a0[0]) * ux + (p[1] - a0[1]) * uy
+
+    order = sorted(zip(pairs, texts), key=lambda e: along(e[0][2]) + along(e[0][3]))
+    cursor = None            # end of the last text placed on the second row
+    last = len(order) - 1
+    for i, ((p0, p1, a, b), text) in enumerate(order):
+        lo, hi = sorted((along(a), along(b)))
+        gap, mid = hi - lo, (lo + hi) / 2.0
         width = text_width(text, size)
-        if width + 1.0 <= gap:
+        if width + 1.0 <= gap or gap <= 1e-9:
             items.append(Dim(p0, p1, a, b, text, size))
             continue
-        # Too wide for its gap: put it below the line and slide it along
-        # until it is clear of the previous one.
-        sa = (a[0] - a0[0]) * ux + (a[1] - a0[1]) * uy
-        sb = (b[0] - a0[0]) * ux + (b[1] - a0[1]) * uy
-        mid = (sa + sb) / 2.0
-        if flip:
-            mid = -mid
-        centre = mid if cursor is None else max(mid, cursor + width / 2.0 + 1.2)
-        cursor = centre + width / 2.0
-        items.append(Dim(p0, p1, a, b, text, size, text_level=1,
-                         text_shift=(centre - mid) / gap if gap > 1e-9 else 0.0))
+        if i == last:
+            centre, level = hi + 1.6 + width / 2.0, 0
+        elif i == 0 and start_outside:
+            centre, level = lo - 1.6 - width / 2.0, 0
+        else:
+            centre = mid if cursor is None else max(mid, cursor + width / 2.0 + 1.2)
+            cursor = centre + width / 2.0
+            level = outer_level          # the row on the side away from the view
+        items.append(Dim(p0, p1, a, b, text, size, text_level=level, text_shift=(centre - mid) / gap))
+
+
+def _fits(text, size, gap):
+    from .export_pdf import text_width
+    return text_width(text, size) + 1.0 <= gap
 
 
 def _view_dimensions(items, pl, settings):
@@ -477,36 +503,41 @@ def _view_dimensions(items, pl, settings):
     vd = D.compute(v, fmt, k, size, settings.detail, settings.forced_parts, settings.radii)
 
     DIM_STEP = _dim_step(size)
+    x_gaps = list(zip(vd.x_chain[:-1], vd.x_chain[1:])) if len(vd.x_chain) > 2 else []
+    y_gaps = list(zip(vd.y_chain[:-1], vd.y_chain[1:])) if len(vd.y_chain) > 2 else []
+    # Both chains start at the bottom-left corner. If both begin with a gap too
+    # small for its text, only the vertical one moves its text outside there.
+    y_first_small = bool(y_gaps) and not _fits(fmt.text(y_gaps[0][1] - y_gaps[0][0]), size,
+                                               (y_gaps[0][1] - y_gaps[0][0]) * k)
+
     # Horizontal: chain just below the view, overall below the chain.
     level = 1
-    y_edge = pl.bottom
-    if len(vd.x_chain) > 2:
-        y = y_edge + DIM_STEP * level
-        pairs, texts = [], []
-        for x0, x1 in zip(vd.x_chain[:-1], vd.x_chain[1:]):
+    if x_gaps:
+        y = pl.bottom + DIM_STEP * level
+        pairs = []
+        for x0, x1 in x_gaps:
             p0, p1 = pl.to_paper(x0, v.min_y), pl.to_paper(x1, v.min_y)
             pairs.append((p0, p1, (p0[0], y), (p1[0], y)))
-            texts.append(fmt.text(x1 - x0))
-        _chain(items, pairs, texts, size)
+        _chain(items, pairs, [fmt.text(x1 - x0) for x0, x1 in x_gaps], size,
+               start_outside=not y_first_small)
         level += 1
-    y = y_edge + DIM_STEP * level
+    y = pl.bottom + DIM_STEP * level
     p0, p1 = pl.to_paper(v.min_x, v.min_y), pl.to_paper(v.max_x, v.min_y)
-    items.append(Dim(p0, p1, (p0[0], y), (p1[0], y), fmt.text(v.width), size))
+    _chain(items, [(p0, p1, (p0[0], y), (p1[0], y))], [fmt.text(v.width)], size)
 
     # Vertical: chain just left of the view, overall left of the chain.
     level = 1
-    if len(vd.y_chain) > 2:
+    if y_gaps:
         x = pl.x - DIM_STEP * level
-        pairs, texts = [], []
-        for y0, y1 in zip(vd.y_chain[:-1], vd.y_chain[1:]):
+        pairs = []
+        for y0, y1 in y_gaps:
             p0, p1 = pl.to_paper(v.min_x, y0), pl.to_paper(v.min_x, y1)
             pairs.append((p0, p1, (x, p0[1]), (x, p1[1])))
-            texts.append(fmt.text(y1 - y0))
-        _chain(items, pairs, texts, size)
+        _chain(items, pairs, [fmt.text(y1 - y0) for y0, y1 in y_gaps], size, outer_level=-1)
         level += 1
     x = pl.x - DIM_STEP * level
     p0, p1 = pl.to_paper(v.min_x, v.min_y), pl.to_paper(v.min_x, v.max_y)
-    items.append(Dim(p0, p1, (x, p0[1]), (x, p1[1]), fmt.text(v.height), size))
+    _chain(items, [(p0, p1, (x, p0[1]), (x, p1[1]))], [fmt.text(v.height)], size)
 
     # Radii: a short leader pointing at the arc, away from its centre.
     cx_view = (v.min_x + v.max_x) / 2.0
@@ -594,7 +625,9 @@ def _margins(views, settings, notes_by_view):
         note_room = 3.0
         if notes_by_view[name]:
             note_room = NOTE_GAP + 2.0 + max(text_width(t, size) for _, t in notes_by_view[name])
-        out[name] = (dim_room, note_room, LABEL_H + size * 0.6, dim_room)
+        # Top: the view label, plus room for a narrow gap's text placed past the chain end.
+        top_room = LABEL_H + size * 0.6 + (size * 2.6 if settings.dimensions else 0.0)
+        out[name] = (dim_room, note_room, top_room, dim_room)
     return out
 
 
@@ -659,13 +692,20 @@ def _plan(views, settings, margins):
     else:
         for groups in _groupings(views):
             candidates.append((settings.paper, groups))
+    # Take the first candidate that is readable. If none is, take the one with
+    # the largest drawing; more sheets or bigger paper are only used when they
+    # actually make the drawing larger.
     best = None
     for paper, groups in candidates:
         scale = evaluate(paper, groups)
         if scale is None:
             continue
-        best = (paper, groups, scale)
+        # Without reaching "readable", another sheet or paper size is only
+        # worth it when the drawing gets clearly larger (more than a quarter).
+        if best is None or scale < best[2] * 0.75:
+            best = (paper, groups, scale)
         if scale <= readable:
+            best = (paper, groups, scale)
             break
     if best is None:
         paper, groups = candidates[-1]

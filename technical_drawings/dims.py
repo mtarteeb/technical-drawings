@@ -160,7 +160,11 @@ def compute(view, fmt, k, text_size, detail='MEDIUM', forced_parts=(), radii=Tru
             fy += [box[1], box[3]]
 
     def min_gap(length):
-        return (text_width(fmt.text(length), text_size) + 1.6) / k
+        # A break is only dropped when its gap is too small to draw at all.
+        # Gaps that are merely narrower than their text are kept, and the text
+        # is placed beside the dimension line: an inner size such as a frame
+        # thickness or an opening must never disappear.
+        return 2.5 / k
 
     out = ViewDims()
     xb = _breaks(vertical, view.min_x, view.max_x, view.height, threshold, fx)

@@ -82,6 +82,10 @@ class TD_Settings(PropertyGroup):
     view_back: BoolProperty(name="Back", default=False)
     hidden_lines: BoolProperty(name="Hidden Lines", default=False,
                                description="Draw edges that are hidden behind other parts as dashed lines")
+    ignore_bevels: BoolProperty(
+        name="Ignore Bevels", default=True,
+        description="Draw and measure parts as if their Bevel modifiers were off, so sizes are the "
+                    "true corner-to-corner sizes. The model is not changed")
     colour_lights: BoolProperty(
         name="Colour Light Strips", default=True,
         description="Draw objects whose material emits light in the colour of the light")
@@ -217,7 +221,8 @@ class TD_OT_export(Operator):
             views = engine.extract_views(
                 objects, views_wanted, engine.FRONT_DIRECTIONS[st.front_direction],
                 frame=scene.frame_current, hidden_lines=st.hidden_lines,
-                colour_lights=st.colour_lights, unit_scale=unit_scale)
+                colour_lights=st.colour_lights, unit_scale=unit_scale,
+                ignore_bevels=st.ignore_bevels)
 
             image_data, pictures, missing = {}, [], []
             for i, pic in enumerate(st.pictures):
@@ -278,7 +283,8 @@ class TD_OT_export(Operator):
         if st.export_cnc:
             outlines = []
             for ob in objects:
-                result = engine.extract_outline(ob, frame=scene.frame_current, unit_scale=unit_scale)
+                result = engine.extract_outline(ob, frame=scene.frame_current, unit_scale=unit_scale,
+                                                ignore_bevels=st.ignore_bevels)
                 if result:
                     outlines.append((ob.name,) + result)
             if outlines:
@@ -459,6 +465,7 @@ class TD_PT_views(TD_PT_base, Panel):
         col = layout.column(heading="Lines", align=True)
         col.prop(st, "hidden_lines")
         col.prop(st, "colour_lights")
+        col.prop(st, "ignore_bevels")
 
 
 class TD_PT_dimensions(TD_PT_base, Panel):

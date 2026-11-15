@@ -190,11 +190,33 @@ def _read_layer(layer, right, up):
             if offsets[i + 1] - offsets[i] >= 2]
 
 
+def _all_objects(objects):
+    """The objects plus everything inside the collections they instance."""
+    seen, stack = {}, list(objects)
+    while stack:
+        ob = stack.pop()
+        if ob.name in seen:
+            continue
+        seen[ob.name] = ob
+        if ob.instance_collection is not None:
+            stack.extend(ob.instance_collection.all_objects)
+    return list(seen.values())
+
+
 class _TempScene:
     """Temporary scene with a camera and a Line Art object; always cleaned up."""
 
-    def __init__(self, objects, frame):
+    def __init__(self, objects, frame, ignore_bevels=True):
         data = bpy.data
+        # Bevel modifiers are switched off while drawing and switched back on
+        # afterwards, so parts are drawn and measured with their true corners.
+        self.bevels = []
+        if ignore_bevels:
+            for ob in _all_objects(objects):
+                for mod in getattr(ob, 'modifiers', ()):
+                    if mod.type == 'BEVEL' and mod.show_viewport:
+                        self.bevels.append(mod)
+                        mod.show_viewport = False
         self.scene = data.scenes.new("TD_TempScene")
         self.cam_data = data.cameras.new("TD_TempCamera")
         self.cam_data.type = 'ORTHO'
@@ -246,6 +268,9 @@ class _TempScene:
 
     def close(self):
         data = bpy.data
+        for mod in self.bevels:
+            mod.show_viewport = True
+        self.bevels = []
         data.scenes.remove(self.scene)
         data.objects.remove(self.gp_obj)
         data.objects.remove(self.cam)
@@ -257,7 +282,8 @@ class _TempScene:
 
 
 def extract_views(objects, view_names, front_dir, frame=1, hidden_lines=False,
-                  colour_lights=True, crease_angle=math.radians(140.0), unit_scale=1.0):
+                  colour_lights=True, crease_angle=math.radians(140.0), unit_scale=1.0,
+                  ignore_bevels=True):
     """Compute 2D line views of `objects`.
 
     Returns {view_name: View}. Coordinates are metres (after `unit_scale`).
@@ -274,7 +300,7 @@ def extract_views(objects, view_names, front_dir, frame=1, hidden_lines=False,
             if col is not None and (col in light_groups or len(light_groups) < MAX_LIGHT_COLOURS):
                 light_groups.setdefault(col, []).append(ob)
 
-    tmp = _TempScene(objects, frame)
+    tmp = _TempScene(objects, frame, ignore_bevels)
     views = {}
     try:
         tmp.layer('visible')
@@ -326,7 +352,7 @@ def extract_views(objects, view_names, front_dir, frame=1, hidden_lines=False,
     return views
 
 
-def extract_outline(obj, frame=1, unit_scale=1.0):
+def extract_outline(obj, frame=1, unit_scale=1.0, ignore_bevels=True):
     """Flat cutting outline of one object, seen along its thinnest side.
 
     Returns (polylines, width, height, thickness) in metres, or None when the
@@ -334,7 +360,7 @@ def extract_outline(obj, frame=1, unit_scale=1.0):
     """
     if not is_drawable(obj):
         return None
-    tmp = _TempScene([obj], frame)
+    tmp = _TempScene([obj], frame, ignore_bevels)
     try:
         tmp.layer('visible')
         _add_lineart(tmp.gp_obj, 'visible', tmp.mat, 0, 0, math.radians(140.0), contour_only=True)
