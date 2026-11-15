@@ -20,13 +20,18 @@ class TD_Swatch(PropertyGroup):
                                default=(0.12, 0.27, 0.49))
 
 
-class TD_Picture(PropertyGroup):
-    path: StringProperty(name="Picture", subtype='FILE_PATH',
-                         description="A finished render to place on the sheet")
-
-
 def _camera_poll(self, obj):
     return obj.type == 'CAMERA'
+
+
+class TD_Picture(PropertyGroup):
+    camera: PointerProperty(
+        name="Camera", type=bpy.types.Object, poll=_camera_poll,
+        description="Camera to render from. The picture is rendered with the scene's render settings "
+                    "when you export, which can take a while")
+    path: StringProperty(
+        name="Finished Render", subtype='FILE_PATH',
+        description="Optional: use this finished render instead of rendering the camera again")
 
 
 class TD_Settings(PropertyGroup):
@@ -95,9 +100,11 @@ class TD_Settings(PropertyGroup):
     picture_index: IntProperty()
 
     quote_camera: PointerProperty(name="Camera", type=bpy.types.Object, poll=_camera_poll,
-                                  description="Camera the render was made from. Empty = the scene camera")
-    quote_picture: StringProperty(name="Render", subtype='FILE_PATH',
-                                  description="The finished render made from this camera")
+                                  description="Camera of the render. Empty = the scene camera")
+    quote_picture: StringProperty(
+        name="Finished Render", subtype='FILE_PATH',
+        description="Optional: the finished render made from this camera. "
+                    "Leave empty to render the camera when you export")
     quote_colour: FloatVectorProperty(name="Colour", subtype='COLOR', size=3, min=0.0, max=1.0,
                                       default=(1.0, 1.0, 1.0),
                                       description="Colour of the dimensions and notes on the picture")
@@ -202,17 +209,25 @@ class TD_OT_export(Operator):
                 colour_lights=st.colour_lights, unit_scale=unit_scale)
 
             image_data, pictures, missing = {}, [], []
-            for pic in st.pictures:
-                if not pic.path:
+            for i, pic in enumerate(st.pictures):
+                if pic.path:
+                    key = pic.path
+                    loaded = images.load_jpeg(pic.path)
+                    if loaded is None:
+                        missing.append(os.path.basename(pic.path))
+                        continue
+                elif pic.camera is not None:
+                    key = "camera:%d:%s" % (i, pic.camera.name)
+                    loaded = images.render_camera(scene, pic.camera)
+                    if loaded is None:
+                        missing.append(pic.camera.name)
+                        continue
+                else:
                     continue
-                loaded = images.load_jpeg(pic.path)
-                if loaded is None:
-                    missing.append(os.path.basename(pic.path))
-                    continue
-                image_data[pic.path] = loaded
-                pictures.append((pic.path, loaded[1], loaded[2]))
+                image_data[key] = loaded
+                pictures.append((key, loaded[1], loaded[2]))
             if missing:
-                self.report({'WARNING'}, "Picture not found: " + ", ".join(missing))
+                self.report({'WARNING'}, "Picture could not be made: " + ", ".join(missing))
 
             notes = ["ALL DIMENSIONS ARE IN %s UNLESS OTHERWISE SPECIFIED." % {
                 'CM': "CENTIMETERS", 'MM': "MILLIMETERS", 'M': "METERS", 'IN': "INCHES"}[st.unit]]
@@ -261,11 +276,16 @@ class TD_OT_export(Operator):
         camera = st.quote_camera or scene.camera
         if camera is None:
             raise ValueError("Choose the camera the render was made from.")
-        if not st.quote_picture:
-            raise ValueError("Choose the finished render picture.")
-        loaded = images.load_jpeg(st.quote_picture)
-        if loaded is None:
-            raise ValueError("The render picture could not be read.")
+        if st.quote_picture:
+            picture_key = st.quote_picture
+            loaded = images.load_jpeg(st.quote_picture)
+            if loaded is None:
+                raise ValueError("The render picture could not be read.")
+        else:
+            picture_key = "camera:" + camera.name
+            loaded = images.render_camera(scene, camera, max_width=2400)
+            if loaded is None:
+                raise ValueError("The camera could not be rendered.")
         render = scene.render
         cam_aspect = (render.resolution_x * render.pixel_aspect_x) / (render.resolution_y * render.pixel_aspect_y)
         if abs(loaded[1] / loaded[2] - cam_aspect) > 0.01 * cam_aspect:
@@ -273,12 +293,12 @@ class TD_OT_export(Operator):
                                      "dimensions may not line up.")
         meshes = [o for o in objects if o.type in engine.DRAWABLE_TYPES]
         sh = quotation.build(
-            scene, camera, meshes, (st.quote_picture, loaded[1], loaded[2]), _format(st),
+            scene, camera, meshes, (picture_key, loaded[1], loaded[2]), _format(st),
             colour=tuple(st.quote_colour), text_size=st.quote_text_size,
             own_dims=[o for o in meshes if o.td_own_dims],
             notes=[(o, o.td_note.strip()) for o in meshes if st.object_notes and o.td_note.strip()],
             overall=st.dimensions)
-        image_data = {st.quote_picture: loaded}
+        image_data = {picture_key: loaded}
         base += " - Quotation"
         written = []
         if st.export_pdf:
@@ -350,7 +370,7 @@ class TD_UL_swatches(UIList):
 
 class TD_UL_pictures(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
-        layout.prop(item, "path", text="")
+        layout.prop(item, "camera", text="")
 
 
 class TD_PT_base:
@@ -393,8 +413,10 @@ class TD_PT_quotation(TD_PT_base, Panel):
     def draw(self, context):
         st = context.scene.technical_drawings
         layout = self._split(self.layout)
-        layout.prop(st, "quote_picture")
         layout.prop(st, "quote_camera")
+        layout.prop(st, "quote_picture")
+        if not st.quote_picture:
+            layout.label(text="No file: the camera is rendered on export.", icon='INFO')
         layout.prop(st, "quote_colour")
         layout.prop(st, "quote_text_size")
 
@@ -486,6 +508,11 @@ class TD_PT_pictures(TD_PT_base, Panel):
         col = row.column(align=True)
         col.operator(TD_OT_list_add.bl_idname, icon='ADD', text="").target = "pictures"
         col.operator(TD_OT_list_remove.bl_idname, icon='REMOVE', text="").target = "pictures"
+        if 0 <= st.picture_index < len(st.pictures):
+            pic = st.pictures[st.picture_index]
+            col = self.layout.column()
+            col.label(text="Rendered from the camera on export.", icon='INFO')
+            col.prop(pic, "path", text="Or Use File")
 
 
 class TD_PT_swatches(TD_PT_base, Panel):

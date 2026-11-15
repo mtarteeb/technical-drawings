@@ -33,13 +33,14 @@ Pantone swatches and the information strip.
 - **Notes**: click an object, type its note (for example `STICKER`) in *Dimensions and Notes*. It appears with an arrow.
 - **Own Dimensions**: tick this on an object whose edges must always be dimensioned.
 - **Light strips**: objects with a light-emitting material are drawn in colour.
+- **Render pictures**: add a camera under *Render Pictures*; it is rendered with the scene's render settings when you export. A finished render file can be used instead.
 - **Files**: PDF, SVG (Illustrator), DXF (AutoCAD, true size, editable dimensions) and CNC outlines (DXF).
 
 ### Quotation
 
 Dimensions and notes laid over a finished render, as editable lines and text.
 
-1. Choose the render picture and the camera it was rendered from.
+1. Choose the camera. Add the finished render made from it, or leave the file empty to render on export.
 2. Tick **Own Dimensions** on the objects that should show their width, depth and height.
    With none ticked, the overall size of the selection is shown.
 3. Export as PDF or SVG.
