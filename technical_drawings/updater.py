@@ -40,6 +40,15 @@ def current_version():
         return "0.0.0"
 
 
+# The version whose code is running. If the files on disk are replaced while
+# Blender is open, the two differ until Blender is restarted.
+LOADED_VERSION = current_version()
+
+
+def restart_needed():
+    return current_version() != LOADED_VERSION
+
+
 def _as_tuple(version):
     parts = []
     for piece in version.split("."):

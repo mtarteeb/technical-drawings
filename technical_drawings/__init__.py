@@ -429,6 +429,11 @@ def _draw_update(layout, compact=False):
     """Update status and buttons, shared by the preferences and the panel."""
     st = updater.state
     status = st['status']
+    if updater.restart_needed():
+        box = layout.box()
+        box.alert = True
+        box.label(text="Updated to %s. Restart Blender to use it." % updater.current_version(), icon='ERROR')
+        return
     if updater.managed_by_blender():
         if not compact:
             layout.label(text="Version %s. Updates arrive through Get Extensions." % updater.current_version(),
