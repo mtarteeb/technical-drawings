@@ -421,7 +421,17 @@ class TD_OT_install_update(Operator):
             return {'CANCELLED'}
         updater.state.update(status='INSTALLING', message="Updating...")
         # Run just after this button finishes, because the update replaces this add-on's own code.
-        bpy.app.timers.register(lambda: (updater.install(), None)[1], first_interval=0.2)
+        def run():
+            windows = bpy.context.window_manager.windows
+            if windows:
+                with bpy.context.temp_override(window=windows[0]):
+                    updater.install()
+            else:
+                updater.install()
+            updater._redraw()
+            return None
+
+        bpy.app.timers.register(run, first_interval=0.2)
         return {'FINISHED'}
 
 
@@ -433,11 +443,6 @@ def _draw_update(layout, compact=False):
         box = layout.box()
         box.alert = True
         box.label(text="Updated to %s. Restart Blender to use it." % updater.current_version(), icon='ERROR')
-        return
-    if updater.managed_by_blender():
-        if not compact:
-            layout.label(text="Version %s. Updates arrive through Get Extensions." % updater.current_version(),
-                         icon='CHECKMARK')
         return
     if status == 'AVAILABLE':
         box = layout.box()

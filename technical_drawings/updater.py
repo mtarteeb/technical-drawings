@@ -1,9 +1,9 @@
 """Update check for copies installed from a zip file.
 
-A copy installed from the TARTEEB update link is updated by Blender itself
-(Get Extensions). A copy installed from a zip has no link to check, so this
-module looks at the same release index, tells the user when a newer version
-exists, and installs it on request. Nothing is sent anywhere; it only
+Every copy, however it was installed, looks at the release index on GitHub
+shortly after Blender starts, tells the user when a newer version exists, and
+installs it on request. A copy installed from the TARTEEB update link is
+updated through that link; a copy installed from a zip downloads the new zip. Nothing is sent anywhere; it only
 downloads the public index and the add-on zip, and only when Blender's
 "Allow Online Access" is on.
 """
@@ -138,6 +138,23 @@ def install():
         if check() != 'AVAILABLE':
             return False
     state.update(status='INSTALLING', message="Downloading version %s..." % state['latest'])
+    if managed_by_blender():
+        # Installed from the update link: let Blender fetch it from that link.
+        latest = state['latest']
+        try:
+            repos = bpy.context.preferences.extensions.repos
+            index = next(i for i, r in enumerate(repos) if r.module == module)
+            bpy.ops.extensions.repo_sync(repo_index=index)
+            result = bpy.ops.extensions.package_install(repo_index=index, pkg_id=PKG_ID,
+                                                        enable_on_install=True)
+        except Exception as err:
+            state.update(status='ERROR', message="Could not install the update: %s" % err)
+            return False
+        if 'FINISHED' not in result:
+            state.update(status='ERROR', message="Blender did not install the update")
+            return False
+        state.update(status='INSTALLED', message="Updated to version %s" % latest)
+        return True
     try:
         data = _fetch(state['archive'])
         expected = state.get('hash') or ""
@@ -173,7 +190,7 @@ def install():
 
 def startup_check():
     """Called once shortly after Blender starts."""
-    if bpy.app.background or not online_allowed() or managed_by_blender():
+    if bpy.app.background or not online_allowed():
         return None
     check_in_background()
     return None
