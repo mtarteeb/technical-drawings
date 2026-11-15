@@ -1,0 +1,15 @@
+schema_version = "1.0.0"
+
+id = "technical_drawings"
+version = "0.2.0"
+name = "Technical Drawings"
+tagline = "Technical drawing sheets from selected objects"
+maintainer = "TARTEEB"
+type = "add-on"
+
+blender_version_min = "4.3.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+
+[permissions]
+files = "Save drawings (PDF, SVG, DXF) and read render pictures"

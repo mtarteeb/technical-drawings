@@ -1,0 +1,7 @@
+# Client work and test output never go in the public repo
+previews/
+dist/
+__pycache__/
+*.pyc
+.DS_Store
+*.blend1
