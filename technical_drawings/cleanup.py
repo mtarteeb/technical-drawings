@@ -229,3 +229,51 @@ def find_arcs(polyline, min_points=5, min_sweep=math.radians(25.0), tol=0.01):
                 arcs.append(Arc(cx, cy, r, a0, a1, full, i0, i1))
         i = j + 1
     return arcs
+
+
+def slanted_edges(segments, angle_step=math.radians(0.5), offset_step=5e-4):
+    """Straight edges that are neither horizontal nor vertical.
+
+    Collinear pieces (Line Art splits an edge wherever something crosses it)
+    are joined back into whole edges. Returns a list of
+    (x0, y0, x1, y1, length, angle) with the first point the lower one and
+    `angle` the edge's slope from the horizontal in radians (0..pi/2).
+    """
+    if len(segments) == 0:
+        return []
+    groups = defaultdict(list)
+    for x0, y0, x1, y1 in segments:
+        dx, dy = x1 - x0, y1 - y0
+        length = math.hypot(dx, dy)
+        if length <= SNAP:
+            continue
+        ux, uy = dx / length, dy / length
+        if uy < 0 or (uy == 0 and ux < 0):
+            ux, uy = -ux, -uy
+        theta = math.atan2(uy, ux)                    # 0..pi
+        offset = x0 * uy - y0 * ux                    # signed distance of the line from the origin
+        t0, t1 = x0 * ux + y0 * uy, x1 * ux + y1 * uy
+        groups[(round(theta / angle_step), round(offset / offset_step))].append(
+            (min(t0, t1), max(t0, t1), ux, uy, offset, length))
+    edges = []
+    for items in groups.values():
+        items.sort()
+        # Direction and position from the longest piece: the most accurate one.
+        _, _, ux, uy, offset, _ = max(items, key=lambda it: it[5])
+        lo, hi = items[0][0], items[0][1]
+        runs = []
+        for nlo, nhi, *_rest in items[1:]:
+            if nlo <= hi + 1e-4:
+                hi = max(hi, nhi)
+            else:
+                runs.append((lo, hi))
+                lo, hi = nlo, nhi
+        runs.append((lo, hi))
+        for lo, hi in runs:
+            # Point on the line at parameter t: t * u + offset * (uy, -ux)
+            bx, by = offset * uy, -offset * ux
+            x0, y0 = bx + lo * ux, by + lo * uy
+            x1, y1 = bx + hi * ux, by + hi * uy
+            slope = math.atan2(abs(uy), abs(ux))
+            edges.append((x0, y0, x1, y1, hi - lo, slope))
+    return edges

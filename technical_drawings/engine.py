@@ -68,7 +68,17 @@ def light_colour(obj):
     above zero, or an Emission shader. White and warm lights are drawn amber
     because white does not show on paper.
     """
-    for slot in getattr(obj, 'material_slots', ()):
+    slots = list(getattr(obj, 'material_slots', ()))
+    # A lantern with a glowing bulb is not a light strip: the object only counts
+    # as a light when at least half of its faces use a light-emitting material.
+    share = None
+    if obj.type == 'MESH' and len(slots) > 1 and len(obj.data.polygons):
+        idx = np.empty(len(obj.data.polygons), dtype=np.int32)
+        obj.data.polygons.foreach_get('material_index', idx)
+        share = np.bincount(idx, minlength=len(slots)) / float(len(idx))
+    emitting = 0.0
+    result = None
+    for slot_index, slot in enumerate(slots):
         mat = slot.material
         if mat is None or not mat.use_nodes or mat.node_tree is None:
             continue
@@ -93,8 +103,18 @@ def light_colour(obj):
             r, g, b = (max(0.0, min(1.0, _linear_to_srgb(v))) for v in colour)
             hi, lo = max(r, g, b), min(r, g, b)
             if hi <= 0.0 or (hi - lo) / hi < 0.35:
-                return WARM_LIGHT
-            return (round(r / hi, 2), round(g / hi, 2), round(b / hi, 2))
+                found = WARM_LIGHT
+            else:
+                found = (round(r / hi, 2), round(g / hi, 2), round(b / hi, 2))
+            if share is None:
+                return found
+            part = float(share[slot_index]) if slot_index < len(share) else 0.0
+            emitting += part
+            if result is None or part > result[0]:
+                result = (part, found)
+            break                                   # one emitting node is enough for this material
+    if share is not None and result is not None and emitting >= 0.5:
+        return result[1]
     return None
 
 

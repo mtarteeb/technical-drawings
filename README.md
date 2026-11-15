@@ -36,6 +36,7 @@ Pantone swatches and the information strip.
 - **Company logo**: the TARTEEB logo is drawn in black in its own *Company* box of the information strip (can be switched off under *Sheet Information*).
 - **Decoration**: tick *Decoration (No Dimensions)* on logos and graphics so they are drawn but not dimensioned.
 - **Dimensions** are measured from the model: overall sizes, a chain at every long straight edge (so inner sizes such as an opening and a frame thickness are shown), radii of arcs. A gap too narrow for its text is never dropped; the text is placed beside it.
+- **Angled edges**: long straight edges that are not horizontal or vertical get their true length along the edge and their angle from the horizontal.
 - **Bevels**: Bevel modifiers are ignored while drawing (*Ignore Bevels*), so sizes are true corner-to-corner sizes. The model is not changed.
 - **Notes**: click an object, type its note (for example `STICKER`) in *Dimensions and Notes*. It appears with an arrow.
 - **Own Dimensions**: tick this on an object whose edges must always be dimensioned.

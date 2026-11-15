@@ -539,8 +539,52 @@ def _view_dimensions(items, pl, settings):
     p0, p1 = pl.to_paper(v.min_x, v.min_y), pl.to_paper(v.min_x, v.max_y)
     _chain(items, [(p0, p1, (x, p0[1]), (x, p1[1]))], [fmt.text(v.height)], size)
 
+    # Angled edges: true length along the edge, and the angle from the horizontal.
+    centre = ((pl.x + pl.right) / 2.0, (pl.y + pl.bottom) / 2.0)
+    angles_shown = set()
+    for x0, y0, x1, y1, length, slope in vd.slanted:
+        p0, p1 = pl.to_paper(x0, y0), pl.to_paper(x1, y1)          # p0 is the lower end
+        ex, ey = p1[0] - p0[0], p1[1] - p0[1]
+        plen = math.hypot(ex, ey) or 1.0
+        ex, ey = ex / plen, ey / plen
+        nx, ny = -ey, ex
+        mid = ((p0[0] + p1[0]) / 2.0, (p0[1] + p1[1]) / 2.0)
+        if (mid[0] - centre[0]) * nx + (mid[1] - centre[1]) * ny < 0:      # push away from the view
+            nx, ny = -nx, -ny
+        degrees = round(math.degrees(slope))
+        show_angle = degrees not in angles_shown
+        angles_shown.add(degrees)
+        radius = max(size * 1.6, min(size * 2.4, plen * 0.55))
+        # The length sits outside the angle arc, so the two never overlap.
+        off = radius + size * 1.3 if show_angle else size * 1.5
+        items.append(Dim(p0, p1, (p0[0] + nx * off, p0[1] + ny * off),
+                         (p1[0] + nx * off, p1[1] + ny * off), fmt.text(length), size))
+        if not show_angle:
+            continue
+        # Angle from the horizontal: a reference line, an arc and the value,
+        # at the end of the edge where the angle opens to the outside.
+        a = slope / 2.0
+        chosen = None
+        for vertex, towards in ((p0, 1.0), (p1, -1.0)):      # towards: along the edge, away from this end
+            side = 1.0 if ex * towards >= 0 else -1.0        # horizontal direction of the reference line
+            up = -1.0 if ey * towards < 0 else 1.0           # the edge leaves this end upwards (-1) or downwards (+1)
+            facing = side * math.cos(a) * nx + up * math.sin(a) * ny
+            if chosen is None or facing > chosen[0]:
+                chosen = (facing, vertex, side, up)
+        _, vertex, side, up = chosen
+        items.append(Line([vertex, (vertex[0] + side * radius * 1.25, vertex[1])], L_DIMS, DIM_GREY, 0.10))
+        steps = max(4, int(degrees / 6.0))
+        items.append(Line([(vertex[0] + side * radius * math.cos(slope * i / steps),
+                            vertex[1] + up * radius * math.sin(slope * i / steps))
+                           for i in range(steps + 1)], L_DIMS, DIM_GREY, 0.10))
+        label_r = radius * 0.62
+        items.append(Text(vertex[0] + side * label_r * math.cos(a),
+                          vertex[1] + up * label_r * math.sin(a) + size * 0.28,
+                          "%d\u00b0" % degrees, size * 0.7, L_DIMS, DIM_GREY, anchor='middle'))
+
     # Radii: a short leader pointing at the arc, away from its centre.
     cx_view = (v.min_x + v.max_x) / 2.0
+    placed_labels = []
     for arc in vd.arcs:
         mx, my = arc.mid_point()
         tip = pl.to_paper(mx, my)
@@ -549,6 +593,13 @@ def _view_dimensions(items, pl, settings):
         dx, dy = dx / length, dy / length
         elbow = (tip[0] + dx * size * 2.6, tip[1] + dy * size * 2.6)
         side = 1.0 if (dx > 0 or (dx == 0 and mx >= cx_view)) else -1.0
+        # Keep radius labels from landing on top of each other.
+        for _ in range(8):
+            if all(abs(elbow[1] - py) >= size * 1.15 or abs(elbow[0] - px) >= size * 6.0
+                   for px, py in placed_labels):
+                break
+            elbow = (elbow[0], elbow[1] - size * 1.2)
+        placed_labels.append(elbow)
         end = (elbow[0] + side * size, elbow[1])
         label = ("Ø" + fmt.number(arc.r * 2.0)) if arc.full else ("R" + fmt.number(arc.r))
         items.append(Leader([tip, elbow, end], label, size, L_DIMS,
@@ -635,12 +686,15 @@ def _fit_scale(views, paper, has_pictures, margins):
     a = _areas(paper, has_pictures)
     avail_w = a['right'] - a['views_left'] - 4.0
     avail_h = a['area_bottom'] - a['area_top']
-    for rows in _arrangements(views):
+    best = None
+    for rows in _arrangements(views):          # the largest drawing any arrangement allows
         for scale in SCALES:
             w, h = _block_size(rows, views, 1000.0 / scale, margins)
             if w <= avail_w and h <= avail_h:
-                return scale
-    return None
+                if best is None or scale < best:
+                    best = scale
+                break
+    return best
 
 
 def _groupings(views):

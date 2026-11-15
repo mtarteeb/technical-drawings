@@ -9,6 +9,8 @@ and the vertical chain. Overall sizes are always given. Arcs get a radius.
 import math
 from collections import defaultdict
 
+import numpy as np
+
 from . import cleanup
 
 UNITS = {            # name: (factor from metres, label)
@@ -126,6 +128,7 @@ class ViewDims:
         self.x_chain = []      # sorted x positions (metres) for the horizontal chain
         self.y_chain = []      # sorted y positions for the vertical chain
         self.arcs = []         # cleanup.Arc, one per distinct radius
+        self.slanted = []      # (x0, y0, x1, y1, length, slope): angled edges to dimension
 
 
 def compute(view, fmt, k, text_size, detail='MEDIUM', forced_parts=(), radii=True):
@@ -138,7 +141,7 @@ def compute(view, fmt, k, text_size, detail='MEDIUM', forced_parts=(), radii=Tru
     from .export_pdf import text_width
 
     segs = cleanup.to_segments(view.polylines)
-    horizontal, vertical, _other = cleanup.split_axis_aligned(segs)
+    horizontal, vertical, other = cleanup.split_axis_aligned(segs)
     threshold = DETAIL[detail]
 
     # Lettering (text objects) is drawn but never dimensioned.
@@ -192,6 +195,78 @@ def compute(view, fmt, k, text_size, detail='MEDIUM', forced_parts=(), radii=Tru
 
     out.x_chain = thin_out(xb, _prune(xb, min_gap))
     out.y_chain = thin_out(yb, _prune(yb, min_gap))
+
+    # Angled edges: long straight edges that are neither horizontal nor vertical
+    # get their true length and their angle. Edges on the outline come first,
+    # because their dimension can sit clear of the drawing; an edge inside the
+    # drawing is only taken when it is a major one. Edges of about the same
+    # length and angle (the two sides of one bar, or a mirrored pair) are given once.
+    extent = max(view.width, view.height)
+    share = {'LOW': 0.16, 'MEDIUM': 0.09, 'HIGH': 0.05}[detail]
+    cx, cy = (view.min_x + view.max_x) / 2.0, (view.min_y + view.max_y) / 2.0
+    px, py = segs[:, 0], segs[:, 1]
+    dx, dy = segs[:, 2] - segs[:, 0], segs[:, 3] - segs[:, 1]
+
+    def on_outline(x0, y0, x1, y1):
+        mx, my = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        length = math.hypot(x1 - x0, y1 - y0)
+        nx, ny = -(y1 - y0) / length, (x1 - x0) / length
+        if (mx - cx) * nx + (my - cy) * ny < 0:
+            nx, ny = -nx, -ny
+        # Does a ray from the edge's middle, pointing outwards, meet any other line?
+        denom = nx * dy - ny * dx
+        ok = np.abs(denom) > 1e-12
+        safe = np.where(ok, denom, 1.0)
+        wx, wy = px - mx, py - my
+        s = (wx * dy - wy * dx) / safe
+        u = (wx * ny - wy * nx) / safe
+        return not bool(np.any(ok & (s > 1e-4) & (u >= 0.0) & (u <= 1.0)))
+
+    candidates = []
+    for edge in cleanup.slanted_edges(other):
+        x0, y0, x1, y1, length, slope = edge
+        if length < share * extent or length * k < 6.0:
+            continue
+        if not (math.radians(1.0) < slope < math.radians(89.0)):
+            continue
+        if in_text((x0 + x1) / 2.0, (y0 + y1) / 2.0):
+            continue
+        candidates.append(edge)
+    candidates.sort(key=lambda e: -e[4])
+    picked = []
+    for edge in candidates:
+        length, slope = edge[4], edge[5]
+        # The chains run down the left and along the bottom, so of two matching
+        # edges (a mirrored pair) keep the one nearer the top right, where its
+        # dimension has free space.
+        def free_side(e):
+            return ((e[0] + e[2]) / 2.0 > cx) + ((e[1] + e[3]) / 2.0 > cy)
+
+        twin = next((i for i, o in enumerate(picked)
+                     if abs(slope - o[5]) < math.radians(3.0) and abs(length - o[4]) < 0.12 * o[4]), None)
+        if twin is not None:
+            if free_side(edge) > free_side(picked[twin]) and (
+                    on_outline(*edge[:4]) or not on_outline(*picked[twin][:4])):
+                picked[twin] = edge
+            continue
+        # The second side of the same bar: parallel to, and close beside, a longer edge already taken.
+        mx, my = (edge[0] + edge[2]) / 2.0, (edge[1] + edge[3]) / 2.0
+
+        def beside(o):
+            ox, oy = o[2] - o[0], o[3] - o[1]
+            ol = math.hypot(ox, oy)
+            ex_, ey_ = edge[2] - edge[0], edge[3] - edge[1]
+            parallel = abs(ox * ey_ - oy * ex_) < 0.06 * ol * length
+            return parallel and abs((mx - o[0]) * oy - (my - o[1]) * ox) / ol < 0.1 * extent
+
+        if any(beside(o) for o in picked):
+            continue
+        if not on_outline(*edge[:4]) and length < 0.25 * extent:
+            continue
+        picked.append(edge)
+        if len(picked) == 4:
+            break
+    out.slanted = picked
 
     if radii:
         found = {}

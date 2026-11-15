@@ -267,6 +267,7 @@ def write_dxf(path, sh):
             ax, ay = T(raw.a)
             bx, by = T(raw.b)
             horizontal = abs(ay - by) <= abs(ax - bx)
+            aligned = min(abs(ax - bx), abs(ay - by)) > 1e-6 * max(abs(ax - bx), abs(ay - by), 1e-9)
             dim_count += 1
             name = "*D%d" % dim_count
             block = [wr._g(0, "BLOCK"), wr._g(8, "0"), wr._g(2, name), wr._g(70, 1),
@@ -284,10 +285,10 @@ def write_dxf(path, sh):
                 wr._g(0, "DIMENSION") + wr._g(8, raw.layer) + wr._g(2, name)
                 + wr._g(10, float(bx)) + wr._g(20, float(by)) + wr._g(30, 0.0)
                 + wr._g(11, float(tx)) + wr._g(21, float(ty)) + wr._g(31, 0.0)
-                + wr._g(70, 128 if moved else 0)
+                + wr._g(70, (1 if aligned else 0) + (128 if moved else 0))
                 + wr._g(13, float(p1[0])) + wr._g(23, float(p1[1])) + wr._g(33, 0.0)
                 + wr._g(14, float(p2[0])) + wr._g(24, float(p2[1])) + wr._g(34, 0.0)
-                + wr._g(50, 0.0 if horizontal else 90.0))
+                + ("" if aligned else wr._g(50, 0.0 if horizontal else 90.0)))
         elif isinstance(raw, S.Leader):
             for prim in S.expand(raw):
                 emit(wr.entities, prim)
