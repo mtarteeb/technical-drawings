@@ -449,12 +449,13 @@ class TD_OT_install_update(Operator):
             updater._redraw()
             return None
 
-        bpy.app.timers.register(run, first_interval=0.2)
+        bpy.app.timers.register(run, first_interval=0.2, persistent=True)
         return {'FINISHED'}
 
 
 def _draw_update(layout, compact=False):
     """Update status and buttons, shared by the preferences and the panel."""
+    updater.ensure_checked()
     st = updater.state
     status = st['status']
     if updater.restart_needed():
@@ -730,7 +731,7 @@ def register():
 
     # Look for a newer version once, shortly after Blender starts.
     if not bpy.app.timers.is_registered(updater.startup_check):
-        bpy.app.timers.register(updater.startup_check, first_interval=3.0)
+        bpy.app.timers.register(updater.startup_check, first_interval=3.0, persistent=True)
 
 
 def unregister():

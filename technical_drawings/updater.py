@@ -125,7 +125,26 @@ def check_in_background():
         _redraw()
         return None
 
-    bpy.app.timers.register(poll, first_interval=0.5)
+    # persistent: opening a .blend file must not cancel the check.
+    bpy.app.timers.register(poll, first_interval=0.5, persistent=True)
+
+
+def ensure_checked():
+    """Start the update check if it has not run yet in this Blender session.
+
+    Called whenever the panel is drawn, so the check happens however Blender
+    was started (from the icon, or by opening a .blend file) and does not
+    depend on a start-up timer surviving.
+    """
+    if state['status'] == 'IDLE' and not bpy.app.background and online_allowed():
+        state['status'] = 'CHECKING'
+
+        def start():
+            state['status'] = 'IDLE'
+            check_in_background()
+            return None
+
+        bpy.app.timers.register(start, first_interval=0.1, persistent=True)
 
 
 def install():
