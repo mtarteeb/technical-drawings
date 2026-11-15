@@ -7,7 +7,7 @@
       "id": "technical_drawings",
       "name": "Technical Drawings",
       "tagline": "Technical drawing sheets from selected objects",
-      "version": "0.9.14",
+      "version": "0.9.15",
       "type": "add-on",
       "maintainer": "TARTEEB",
       "license": [
@@ -18,9 +18,9 @@
         "network": "Check for and download add-on updates",
         "files": "Save drawings (PDF, SVG, DXF) and read render pictures"
       },
-      "archive_url": "./technical_drawings-0.9.14.zip",
-      "archive_size": 58710,
-      "archive_hash": "sha256:72bdcb01b4f3e8d3524bca6fdb287ab9b053bb71d5fc9d3176285ad314d28960"
+      "archive_url": "./technical_drawings-0.9.15.zip",
+      "archive_size": 60091,
+      "archive_hash": "sha256:1b07ca9e639fe5b78c588ea9ec37237028b08427b5adc0074adc61094ff5fb49"
     }
   ]
 }
