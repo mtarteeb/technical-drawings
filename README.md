@@ -30,7 +30,7 @@ A sheet with front, top and side views, automatic dimensions, notes, render pict
 Pantone swatches and the information strip.
 
 - **Text size**: dimension and note text is always 12 pt on the printed sheet (adjustable), whatever the drawing scale.
-- **Paper**: standard sizes A4 to A0. When the views cannot be drawn large enough for the dimensions to stay readable, the add-on either spreads them over more sheets or steps up to the next paper size (*If It Does Not Fit*).
+- **Paper**: standard sizes A4 to A0. By default front, side and top go together on one sheet and the drawing is scaled to fit. Under *Sheets* you can instead step up to bigger paper, or split the views over several sheets, when the dimensions would be cramped.
 - **Company logo**: the TARTEEB logo is drawn in black in its own *Company* box of the information strip (can be switched off under *Sheet Information*).
 - **Decoration**: tick *Decoration (No Dimensions)* on logos and graphics so they are drawn but not dimensioned.
 - **Dimensions** are measured from the model: overall sizes, a chain at every long straight edge (so inner sizes such as an opening and a frame thickness are shown), radii of arcs. A gap too narrow for its text is never dropped; the text is placed beside it.

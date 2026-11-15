@@ -256,7 +256,7 @@ class SheetSettings:
     forced_parts: list = field(default_factory=list)    # object names with their own dimensions
     logo: bool = True                                   # company logo in the information strip
     dim_text_size: float = 12.0 * 25.4 / 72.0           # dimension text: 12 pt on paper, at any scale
-    fit: str = 'SHEETS'                                 # SHEETS = add sheets, PAPER = use bigger paper
+    fit: str = 'ONE'                                    # ONE = one sheet, PAPER = bigger paper, SHEETS = split views
 
 
 @dataclass
@@ -686,7 +686,9 @@ def _plan(views, settings, margins):
 
     start = PAPER_ORDER.index(settings.paper)
     candidates = []
-    if settings.fit == 'PAPER':
+    if settings.fit == 'ONE':
+        candidates.append((settings.paper, _groupings(views)[0]))
+    elif settings.fit == 'PAPER':
         for paper in PAPER_ORDER[start:]:
             candidates.append((paper, _groupings(views)[0]))
     else:

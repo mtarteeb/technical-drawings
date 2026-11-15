@@ -57,11 +57,17 @@ class TD_Settings(PropertyGroup):
                         description="Sheet size. With 'Bigger Paper' this is the smallest size used",
                         items=[(k, k + " landscape", "") for k in sheet.PAPER_SIZES])
     fit: EnumProperty(
-        name="If It Does Not Fit", default='SHEETS',
-        description="What to do when the views cannot be drawn large enough on one sheet "
-                    "for the dimensions to stay readable",
-        items=[('SHEETS', "More Sheets", "Keep the paper size and spread the views over more sheets"),
-               ('PAPER', "Bigger Paper", "Keep one sheet and step up to the next standard size (up to A0)")])
+        name="Sheets", default='ONE',
+        description="How the views are fitted onto paper",
+        items=[('ONE', "All Views on One Sheet",
+                "Front, side and top together on one sheet of the chosen paper size; "
+                "the drawing is scaled to fit"),
+               ('PAPER', "One Sheet, Bigger Paper",
+                "All views on one sheet; step up to the next standard paper size (up to A0) "
+                "when the dimensions would be cramped"),
+               ('SHEETS', "Split Views Over Sheets",
+                "Keep the paper size and put views on separate sheets when the dimensions "
+                "would be cramped")])
     text_pt: FloatProperty(
         name="Text Size", default=12.0, min=6.0, max=36.0, subtype='NONE',
         description="Size of dimension and note text on the printed sheet, in points. "

@@ -169,8 +169,29 @@ def compute(view, fmt, k, text_size, detail='MEDIUM', forced_parts=(), radii=Tru
     out = ViewDims()
     xb = _breaks(vertical, view.min_x, view.max_x, view.height, threshold, fx)
     yb = _breaks(horizontal, view.min_y, view.max_y, view.width, threshold, fy)
-    out.x_chain = _prune(xb, min_gap)
-    out.y_chain = _prune(yb, min_gap)
+    def thin_out(breaks, pos):
+        """Keep a chain legible: text that does not fit its gap goes on a second
+        row, and that row only has room for so much. When it would overflow,
+        the least prominent breaks are dropped (never the user's own, and never
+        the first or last gap, whose text goes outside the chain)."""
+        pos = list(pos)
+        while len(pos) > 3:
+            length = (pos[-1] - pos[0]) * k
+            crowd = 0.0
+            for a, b in zip(pos[1:-2], pos[2:-1]):
+                w = text_width(fmt.text(b - a), text_size)
+                if w + 1.0 > (b - a) * k:
+                    crowd += w + 1.2
+            if crowd <= 0.6 * length:
+                break
+            finite = [p for p in pos[1:-1] if breaks[p] != float('inf')]
+            if not finite:
+                break
+            pos.remove(min(finite, key=lambda p: breaks[p]))
+        return pos
+
+    out.x_chain = thin_out(xb, _prune(xb, min_gap))
+    out.y_chain = thin_out(yb, _prune(yb, min_gap))
 
     if radii:
         found = {}
