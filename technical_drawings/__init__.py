@@ -137,7 +137,10 @@ class TD_Settings(PropertyGroup):
                                description="Where the drawings are saved")
     file_name: StringProperty(name="File Name", default="",
                               description="Leave empty to use the drawing title or project name")
-    open_after: BoolProperty(name="Open When Done", default=True)
+    open_after: BoolProperty(
+        name="Open When Done", default=True,
+        description="Open the PDF after exporting, or the folder when no PDF was made. "
+                    "DXF and SVG files are never opened automatically")
 
 
 LIST_INDEX = {"swatches": "swatch_index", "pictures": "picture_index"}
@@ -205,7 +208,11 @@ class TD_OT_export(Operator):
 
         self.report({'INFO'}, "Saved %d file(s)%s to %s" % (len(written), info, out_dir))
         if st.open_after and written and not bpy.app.background:
-            bpy.ops.wm.path_open(filepath=written[0])
+            # Only the PDF is opened for viewing. CAD and vector files are left
+            # closed: a file that is already open in one program opens
+            # read-only (locked) in AutoCAD.
+            pdfs = [p for p in written if p.lower().endswith(".pdf")]
+            bpy.ops.wm.path_open(filepath=pdfs[0] if pdfs else out_dir)
         return {'FINISHED'}
 
     def _production(self, context, st, objects, out_dir, base):
